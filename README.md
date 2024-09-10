@@ -61,7 +61,7 @@ The emulator supports the following features:
 
 ## Dependencies
 
-- [Rust]([https://doc.rust-lang.org/1.2.0/book/nightly-rust.html](https://www.rust-lang.org/))
+- [Rust](https://www.rust-lang.org/)
 
 ### Helpful Tools
 
