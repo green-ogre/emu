@@ -52,12 +52,12 @@ $ cargo build --release
 ## Features List
 
 The emulator supports the following features:
-- [] RV64G ISA
+- [ ] RV64G ISA
   - [x] RV64I (v2.1): supports 43/52 instructions
-  - [] RV64M (v2.0): supports 0/13 instructions
-  - [] RV64A (v2.1): supports 0/22 instructions
-  - [] RV64F (v2.2): supports 0/30 instructions
-  - [] RV64D (v2.2): supports 0/32 instructions
+  - [ ] RV64M (v2.0): supports 0/13 instructions
+  - [ ] RV64A (v2.1): supports 0/22 instructions
+  - [ ] RV64F (v2.2): supports 0/30 instructions
+  - [ ] RV64D (v2.2): supports 0/32 instructions
 
 ## Dependencies
 
