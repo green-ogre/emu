@@ -1,9 +1,9 @@
-# emu: RISC-V Emulataor
+# Emu: RISC-V Emulataor
 
 Native RISC-V emulator in Rust.
 
 ## Resources
-  - Spec: [RISC-V instruction set spec]([https://github.com/d0iasm/rvemu/blob/main/README.md?plain=1](https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf))
+  - Spec: [RISC-V instruction set spec](https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf)
   - Tests: [rvemu](https://github.com/d0iasm/rvemu/blob/main/README.md?plain=1)
 
 ## Usage
