@@ -117,36 +117,54 @@ impl IndexMut<Reg> for [u64; 32] {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 enum Imm {
-    Bin(u32),
-    Hex(u32),
+    Pos(u64),
+    Neg(u64),
+}
+
+impl Debug for Imm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pos(val) => f.debug_tuple("Imm").field(val).finish(),
+            Self::Neg(val) => f.debug_tuple("Imm").field(&(*val as i64)).finish(),
+        }
+    }
 }
 
 impl Imm {
-    pub const ZERO: Self = Self::Bin(0);
+    pub const ZERO: Self = Self::Pos(0);
 
-    pub fn val(&self) -> u32 {
-        *match self {
-            Self::Bin(val) => val,
-            Self::Hex(val) => val,
+    pub fn new(imm: i64) -> Self {
+        if imm < 0 {
+            Self::Neg(imm as u64)
+        } else {
+            Self::Pos(imm as u64)
         }
     }
 
-    pub fn val_signed(&self) -> i32 {
+    pub fn val(&self) -> u64 {
+        *match self {
+            Self::Pos(val) => val,
+            Self::Neg(val) => val,
+        }
+    }
+
+    pub fn val_signed(&self) -> i64 {
         match self {
-            Self::Bin(val) => *val as i32,
-            Self::Hex(val) => *val as i32,
+            Self::Pos(val) => *val as i64,
+            Self::Neg(val) => *val as i64,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Offset(Reg, usize);
+struct Offset(Reg, Imm);
 
 #[derive(Debug)]
 enum Instr {
     Addi(Reg, Reg, Imm),
+    Addiw(Reg, Reg, Imm),
     Lui(Reg, Imm),
     Auipc(Reg, Imm),
     Slti(Reg, Reg, Imm),
@@ -169,13 +187,11 @@ enum Instr {
     And(Reg, Reg, Reg),
     Lb(Reg, Offset),
     Lh(Reg, Offset),
-    Lw(Reg, Offset),
     Ld(Reg, Offset),
     Lbu(Reg, Offset),
     Lhu(Reg, Offset),
     Sb(Reg, Offset),
     Sh(Reg, Offset),
-    Sw(Reg, Offset),
     Sd(Reg, Offset),
     Jal(Reg, Addr),
     Jalr(Reg, Reg, Addr),
@@ -186,6 +202,15 @@ enum Instr {
     Bltu(Reg, Reg, Addr),
     Bgeu(Reg, Reg, Addr),
     Ecall,
+
+    Lw(Reg, Offset),
+    Sw(Reg, Offset),
+    Subw(Reg, Reg, Reg),
+    Srlw(Reg, Reg, Reg),
+    Sraw(Reg, Reg, Reg),
+    Sltw(Reg, Reg, Reg),
+    Sllw(Reg, Reg, Reg),
+    Addw(Reg, Reg, Reg),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -238,8 +263,9 @@ struct Emulator {
     stderr: Vec<u8>,
 }
 
-pub const DRAM_OFFSET: u64 = 0x80000000;
-pub const MEM_SIZE: u64 = u64::MAX;
+pub const DRAM_OFFSET: u64 = 0x40000000;
+pub const STACK_OFFSET: u64 = SEG_LEN;
+pub const USER_MEMORY_SIZE: usize = u32::MAX as usize;
 pub const SEG_LEN: u64 = u32::MAX as u64;
 
 impl Default for Emulator {
@@ -304,41 +330,37 @@ impl Emulator {
     ///
     /// Sign of offset is ignored.
     fn memory(&self, offset: Addr, len: usize) -> &[u8] {
-        let offset = offset.val as usize;
+        let start = offset.val as usize;
+        let end = offset.val as usize + len;
+        println!(
+            "memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
+            USER_MEMORY_SIZE
+        );
 
-        if offset + len < SEG_LEN as usize {
-            &self.memory_lower[offset..offset + len]
-        } else if offset + len < SEG_LEN as usize * 2 && offset >= SEG_LEN as usize {
-            let offset = offset - SEG_LEN as usize;
-            &self.memory_upper[offset..offset + len]
+        if end <= USER_MEMORY_SIZE {
+            &self.memory_lower[start..end]
         } else {
-            panic!("segfault");
-            // &[
-            //     &self.memory_lower[offset..],
-            //     &self.memory_upper[..offset - SEG_LEN as usize + len],
-            // ]
-            // .concat()
+            panic!("SEGFAULT");
         }
     }
 
     /// Slice of mutable memory at location [`Addr`].
     ///
     /// Sign of offset is ignored.
+    ///
+    /// User address space: 0..[`u32::MAX`].
     fn memory_mut(&mut self, offset: Addr, len: usize) -> &mut [u8] {
-        let offset = offset.val as usize;
+        let start = offset.val as usize;
+        let end = offset.val as usize + len;
+        println!(
+            "mut memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
+            USER_MEMORY_SIZE
+        );
 
-        if offset + len < SEG_LEN as usize {
-            &mut self.memory_lower[offset..offset + len]
-        } else if offset + len < SEG_LEN as usize * 2 && offset >= SEG_LEN as usize {
-            let offset = offset - SEG_LEN as usize;
-            &mut self.memory_upper[offset..offset + len]
+        if end <= USER_MEMORY_SIZE {
+            &mut self.memory_lower[start..end]
         } else {
             panic!("segfault");
-            // &[
-            //     &self.memory_lower[offset..],
-            //     &self.memory_upper[..offset - SEG_LEN as usize + len],
-            // ]
-            // .concat()
         }
     }
 
@@ -348,18 +370,12 @@ impl Emulator {
             return false;
         }
 
-        // let mut i = 0;
-        // for byte in self.memory(Addr::new_unsigned(DRAM_OFFSET), 16).iter() {
-        //     println!("{:#x}:{:#x}", DRAM_OFFSET + i, byte);
-        //     i += 1;
-        // }
-
         println!("fetching instr: {:#x}:{raw_instr:#x}", self.pc);
 
         let opcode = raw_instr & 0b1111111;
         let instr = match opcode {
             // R-type
-            0x33 => {
+            0x33 | 0b111011 => {
                 let rd = (raw_instr >> 7) & 0b11111;
                 let fn3 = (raw_instr >> 12) & 0b111;
                 let rs1 = (raw_instr >> 15) & 0b11111;
@@ -371,106 +387,128 @@ impl Emulator {
                 let rs1 = Reg::new(rs1);
                 let rs2 = Reg::new(rs2);
 
-                match fn7 {
-                    0b0000000 => match fn3 {
-                        0b000 => Instr::Add(rd, rs1, rs2),
-                        0b001 => Instr::Sll(rd, rs1, rs2),
-                        0b010 => Instr::Slt(rd, rs1, rs2),
-                        0b011 => Instr::Sltu(rd, rs1, rs2),
-                        0b100 => Instr::Xor(rd, rs1, rs2),
-                        0b101 => Instr::Srl(rd, rs1, rs2),
-                        0b110 => Instr::Or(rd, rs1, rs2),
-                        0b111 => Instr::And(rd, rs1, rs2),
-                        _ => unreachable!(),
+                match opcode {
+                    0x33 => match fn7 {
+                        0b0000000 => match fn3 {
+                            0b000 => Instr::Add(rd, rs1, rs2),
+                            0b001 => Instr::Sll(rd, rs1, rs2),
+                            0b010 => Instr::Slt(rd, rs1, rs2),
+                            0b011 => Instr::Sltu(rd, rs1, rs2),
+                            0b100 => Instr::Xor(rd, rs1, rs2),
+                            0b101 => Instr::Srl(rd, rs1, rs2),
+                            0b110 => Instr::Or(rd, rs1, rs2),
+                            0b111 => Instr::And(rd, rs1, rs2),
+                            val => panic!("{val:#b}"),
+                        },
+                        0b0100000 => match fn3 {
+                            0b000 => Instr::Sub(rd, rs1, rs2),
+                            0b101 => Instr::Sra(rd, rs1, rs2),
+                            val => panic!("{val:#b}"),
+                        },
+                        val => panic!("{val:#b}"),
                     },
-                    0b0100000 => match fn3 {
-                        0b000 => Instr::Sub(rd, rs1, rs2),
-                        0b101 => Instr::Sra(rd, rs1, rs2),
-                        _ => unreachable!(),
+                    0b111011 => match fn7 {
+                        0b000 => match fn3 {
+                            0b000 => Instr::Addw(rd, rs1, rs2),
+                            0b001 => Instr::Sllw(rd, rs1, rs2),
+                            0b101 => Instr::Srlw(rd, rs1, rs2),
+                            val => panic!("{val:#b}"),
+                        },
+                        0b0100000 => match fn3 {
+                            0b000 => Instr::Subw(rd, rs1, rs2),
+                            0b101 => Instr::Sraw(rd, rs1, rs2),
+                            val => panic!("{val:#b}"),
+                        },
+                        val => panic!("{val:#b}"),
                     },
-                    _ => unreachable!(),
+                    val => panic!("{val:#b}"),
                 }
             }
             // I-type
-            0x03 | 0x67 | 0x13 => {
+            0x03 | 0x67 | 0x13 | 0b0011011 => {
                 let rd = (raw_instr >> 7) & 0b11111;
                 let fn3 = (raw_instr >> 12) & 0b111;
                 let rs1 = (raw_instr >> 15) & 0b11111;
-                let imm = raw_instr >> 20;
+                let imm = ((raw_instr as i32) >> 20) as i64;
 
                 // For shifting ops
                 let shamt = (raw_instr >> 20) & 0b11111;
                 let fn7 = (raw_instr >> 25) & 0b1111111;
 
-                let imm = if imm & 0x800 != 0 {
-                    (imm as i32) | 0xFFFFF000u32 as i32
-                } else {
-                    imm as i32
-                };
+                let imm = Imm::new(imm);
+                let shamt = Imm::Pos(shamt as u64);
 
-                println!("decoded instr: {imm:#x} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
+                println!("decoded instr: {imm:?} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
 
                 let rd = Reg::new(rd);
                 let rs1 = Reg::new(rs1);
-                let shamt = Imm::Bin(shamt);
 
                 match opcode {
                     0b0000011 => match fn3 {
-                        0b000 => Instr::Lb(rd, Offset(rs1, imm as usize)),
-                        0b001 => Instr::Lh(rd, Offset(rs1, imm as usize)),
-                        0b010 => Instr::Lw(rd, Offset(rs1, imm as usize)),
-                        0b100 => Instr::Lbu(rd, Offset(rs1, imm as usize)),
-                        0b101 => Instr::Lhu(rd, Offset(rs1, imm as usize)),
-                        _ => unreachable!(),
+                        0b000 => Instr::Lb(rd, Offset(rs1, imm)),
+                        0b001 => Instr::Lh(rd, Offset(rs1, imm)),
+                        0b010 => Instr::Lw(rd, Offset(rs1, imm)),
+                        0b011 => Instr::Ld(rd, Offset(rs1, imm)),
+                        0b100 => Instr::Lbu(rd, Offset(rs1, imm)),
+                        0b101 => Instr::Lhu(rd, Offset(rs1, imm)),
+                        val => panic!("{val:#b}"),
                     },
                     0b0010011 => match fn3 {
-                        0b000 => Instr::Addi(rd, rs1, Imm::Bin(imm as u32)),
-                        0b010 => Instr::Slti(rd, rs1, Imm::Bin(imm as u32)),
-                        0b011 => Instr::Sltiu(rd, rs1, Imm::Bin(imm as u32)),
-                        0b100 => Instr::Xori(rd, rs1, Imm::Bin(imm as u32)),
-                        0b110 => Instr::Ori(rd, rs1, Imm::Bin(imm as u32)),
-                        0b111 => Instr::Andi(rd, rs1, Imm::Bin(imm as u32)),
+                        0b000 => Instr::Addi(rd, rs1, imm),
+                        0b010 => Instr::Slti(rd, rs1, imm),
+                        0b011 => Instr::Sltiu(rd, rs1, imm),
+                        0b100 => Instr::Xori(rd, rs1, imm),
+                        0b110 => Instr::Ori(rd, rs1, imm),
+                        0b111 => Instr::Andi(rd, rs1, imm),
                         0b001 => Instr::Slli(rd, rs1, shamt),
                         0b101 => match fn7 {
                             0b0100000 => Instr::Srai(rd, rs1, shamt),
                             0b0000000 => Instr::Srli(rd, rs1, shamt),
-                            _ => unreachable!(),
+                            val => panic!("{val:#b}"),
                         },
                         _ => panic!("{fn3}"),
                     },
                     0b1100111 => match fn3 {
-                        0b000 => Instr::Jalr(rd, rs1, Addr::new_signed(imm as i64)),
-                        _ => unreachable!(),
+                        0b000 => Instr::Jalr(rd, rs1, Addr::new_signed(imm.val_signed())),
+                        val => panic!("{val:#b}"),
                     },
-                    _ => unreachable!(),
+                    0b0011011 => match fn3 {
+                        0b000 => Instr::Addiw(rd, rs1, imm),
+                        val => panic!("{val:#b}"),
+                    },
+                    val => panic!("{val:#b}"),
                 }
             }
             // S-type
             0x23 => {
-                let imm1 = (raw_instr >> 7) & 0b11111;
                 let fn3 = (raw_instr >> 12) & 0b111;
                 let rs1 = (raw_instr >> 15) & 0b11111;
                 let rs2 = (raw_instr >> 20) & 0b11111;
-                let imm2 = (raw_instr >> 25) & 0b1111111;
 
-                let imm = imm1 | imm2;
-                let imm = if imm & 0x800 != 0 {
-                    (imm as i32) | 0xFFFFF000u32 as i32
+                let imm_11_5 = (raw_instr >> 25) & 0x7F;
+                let imm_4_0 = (raw_instr >> 7) & 0x1F;
+
+                let imm_12bit = (imm_11_5 << 5) | imm_4_0;
+
+                let imm_64 = ((imm_12bit as i64) << 52) >> 52;
+                let imm = if imm_64 < 0 {
+                    Imm::Neg(imm_64 as u64)
                 } else {
-                    imm as i32
+                    Imm::Pos(imm_64 as u64)
                 };
 
-                println!("decoded instr: {imm:#x} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
+                println!("decoded instr: {imm:?} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
 
                 let rs1 = Reg::new(rs1);
                 let rs2 = Reg::new(rs2);
-                let offset = Offset(rs1, imm as usize);
+                let offset = Offset(rs1, imm);
 
                 match fn3 {
                     0b000 => Instr::Sb(rs2, offset),
                     0b001 => Instr::Sh(rs2, offset),
                     0b010 => Instr::Sw(rs2, offset),
-                    _ => unreachable!(),
+                    0b011 => Instr::Sd(rs2, offset),
+                    val => panic!("{val:#b}"),
                 }
             }
             // B-type
@@ -498,7 +536,7 @@ impl Emulator {
                     0b101 => Instr::Bge(rs1, rs2, addr),
                     0b110 => Instr::Bltu(rs1, rs2, addr),
                     0b111 => Instr::Bgeu(rs1, rs2, addr),
-                    _ => unreachable!(),
+                    val => panic!("{val:#b}"),
                 }
             }
             // U-type
@@ -506,15 +544,20 @@ impl Emulator {
                 let rd = (raw_instr >> 7) & 0b11111;
                 let imm = (raw_instr >> 12) << 12;
 
-                println!("decoded instr: {imm:#x} {rd:#x} {opcode:#x}");
+                let imm = if imm & 0x800 != 0 {
+                    Imm::Neg((imm as u64) | 0xFFFFFFFFFFFFF000u64)
+                } else {
+                    Imm::Pos(imm as u64)
+                };
+
+                println!("decoded instr: {imm:?} {rd:#x} {opcode:#x}");
 
                 let rd = Reg::new(rd);
-                let imm = Imm::Bin(imm as u32);
 
                 match opcode {
                     0b0110111 => Instr::Lui(rd, imm),
                     0b0010111 => Instr::Auipc(rd, imm),
-                    _ => unreachable!(),
+                    val => panic!("{val:#b}"),
                 }
             }
             // J-type
@@ -539,7 +582,7 @@ impl Emulator {
                 Instr::Jal(rd, addr)
             }
             0b1110011 => Instr::Ecall,
-            opcode => panic!("invalid opcode: {:x}", opcode),
+            opcode => panic!("invalid opcode: {:#x}", opcode),
         };
 
         self.execute(instr);
@@ -563,20 +606,16 @@ impl Emulator {
     }
 
     pub fn add_pc(&mut self, offset: Addr) {
-        if offset.is_signed() {
-            self.pc = self.pc.wrapping_add(offset.val);
-        } else {
-            self.pc = self.pc + offset.val;
-        }
+        self.pc = self.pc.wrapping_add(offset.val);
     }
 
     pub fn read_pc(&self) -> u64 {
-        self.load(Offset(Reg::Zero, self.pc as usize), 4)
+        self.load(Offset(Reg::Zero, Imm::Pos(self.pc as u64)), 4)
     }
 
     pub fn load(&self, offset: Offset, bytes: usize) -> u64 {
         let mut val = 0;
-        let offset = self.reg(offset.0) as usize + offset.1;
+        let offset = self.reg(offset.0).wrapping_add(offset.1.val());
         let memory = self.memory(Addr::new_unsigned(offset as u64), bytes);
         for (i, byte) in memory.iter().enumerate() {
             val += (*byte as u64) << (i * 8);
@@ -587,7 +626,7 @@ impl Emulator {
 
     pub fn load_signed(&self, offset: Offset, bytes: usize) -> i64 {
         let mut val = 0;
-        let offset = self.reg(offset.0) as usize + offset.1;
+        let offset = self.reg(offset.0).wrapping_add(offset.1.val());
         let memory = self.memory(Addr::new_unsigned(offset as u64), bytes);
         for (i, byte) in memory.iter().enumerate() {
             val += (*byte as i64) << (i * 8);
@@ -596,7 +635,7 @@ impl Emulator {
     }
 
     pub fn store(&mut self, offset: Offset, bytes: usize, val: u64) {
-        let offset = self.reg(offset.0) as usize + offset.1;
+        let offset = self.reg(offset.0).wrapping_add(offset.1.val());
         let memory = self.memory_mut(Addr::new_unsigned(offset as u64), bytes);
         for (i, byte) in memory.iter_mut().enumerate() {
             *byte = (val >> (i * 8)) as u8;
@@ -619,7 +658,10 @@ impl Emulator {
                 );
             }
             Instr::Addi(dst, src, imm) => {
-                self.set_signed(dst, self.reg_signed(src) + imm.val_signed() as i64);
+                self.set_signed(dst, self.reg_signed(src).wrapping_add(imm.val_signed()));
+            }
+            Instr::Addiw(dst, src, imm) => {
+                self.set_signed(dst, self.reg(src).wrapping_add(imm.val()) as i32 as i64);
             }
             Instr::Slti(dst, src, imm) => {
                 self.set(
@@ -660,15 +702,49 @@ impl Emulator {
                 self.set_signed(dst, self.reg_signed(src) >> (imm.val_signed() & 0b11111));
             }
             Instr::Add(dst, src1, src2) => {
-                self.set(dst, self.reg(src1) + self.reg(src2));
+                self.set_signed(
+                    dst,
+                    self.reg_signed(src1).wrapping_add(self.reg_signed(src2)),
+                );
+            }
+            Instr::Addw(dst, src1, src2) => {
+                self.set_signed(
+                    dst,
+                    self.reg(src1).wrapping_add(self.reg(src2)) as i32 as i64,
+                );
             }
             Instr::Sub(dst, src1, src2) => {
-                self.set_signed(dst, self.reg_signed(src1) - self.reg_signed(src2));
+                self.set_signed(
+                    dst,
+                    self.reg_signed(src1).wrapping_sub(self.reg_signed(src2)),
+                );
+            }
+            Instr::Subw(dst, src1, src2) => {
+                self.set_signed(
+                    dst,
+                    self.reg_signed(src1).wrapping_sub(self.reg_signed(src2)) as i32 as i64,
+                );
             }
             Instr::Sll(dst, src1, src2) => {
                 self.set(dst, self.reg(src1) << (self.reg(src2) & 0b11111));
             }
+            Instr::Sllw(dst, src1, src2) => {
+                self.set_signed(
+                    dst,
+                    (self.reg(src1) << (self.reg(src2) & 0b11111)) as i32 as i64,
+                );
+            }
             Instr::Slt(dst, src1, src2) => {
+                self.set(
+                    dst,
+                    if self.reg_signed(src1) < self.reg_signed(src2) {
+                        1
+                    } else {
+                        0
+                    },
+                );
+            }
+            Instr::Sltw(dst, src1, src2) => {
                 self.set(
                     dst,
                     if self.reg_signed(src1) < self.reg_signed(src2) {
@@ -694,10 +770,22 @@ impl Emulator {
             Instr::Srl(dst, src1, src2) => {
                 self.set(dst, self.reg(src1) >> (self.reg(src2) & 0b11111));
             }
+            Instr::Srlw(dst, src1, src2) => {
+                self.set_signed(
+                    dst,
+                    (self.reg(src1) >> (self.reg(src2) & 0b11111)) as i32 as i64,
+                );
+            }
             Instr::Sra(dst, src1, src2) => {
                 self.set_signed(
                     dst,
                     self.reg_signed(src1) >> (self.reg_signed(src2) & 0b11111),
+                );
+            }
+            Instr::Sraw(dst, src1, src2) => {
+                self.set_signed(
+                    dst,
+                    (self.reg_signed(src1) >> (self.reg_signed(src2) & 0b11111)) as i32 as i64,
                 );
             }
             Instr::Or(dst, src1, src2) => {
@@ -741,7 +829,17 @@ impl Emulator {
                 self.pc = ((self.pc as u32).wrapping_add(offset.val as u32)) as u64;
             }
             Instr::Jalr(dst, src, offset) => {
-                todo!();
+                self.set(dst, self.pc + 4);
+                let ra = ((self.reg(src) as u32 + offset.val as u32) >> 1) << 1;
+                self.pc = ((self.pc as u32).wrapping_add(ra)) as u64;
+                if ra == 0 {
+                    // HACK: main function returns to libc, so unfortunately, it can be assumed
+                    // that if the return address is 0, since Reg::Ra will be 0, that we are
+                    // returning from main.
+
+                    self.exiting = true;
+                    self.exit_code = self.reg(Reg::A(0)) as i32;
+                }
                 // self.execute(Instr::Addi(Reg::T(1), Reg::Zero, Imm::Bin(self.pc as u32)));
                 // self.execute(Instr::Addi(dst, Reg::T(1), Imm::Bin(4)));
                 // let jmp = ((self.reg_signed(src) + offset.signed()) & !1) as u64;
@@ -836,6 +934,7 @@ impl Emulator {
 pub fn emulate(prgm: &[u8]) {
     let mut emulator = Emulator::default();
     emulator.flash_prgm(prgm, Addr::new_unsigned(DRAM_OFFSET as u64));
+    emulator.set(Reg::Sp, STACK_OFFSET);
     emulator.run();
 
     for (i, byte) in emulator.memory(Addr::ZERO, 8).iter().enumerate() {
