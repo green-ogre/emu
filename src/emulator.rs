@@ -193,14 +193,14 @@ enum Instr {
     Sb(Reg, Offset),
     Sh(Reg, Offset),
     Sd(Reg, Offset),
-    Jal(Reg, Addr),
-    Jalr(Reg, Reg, Addr),
-    Beq(Reg, Reg, Addr),
-    Bne(Reg, Reg, Addr),
-    Blt(Reg, Reg, Addr),
-    Bge(Reg, Reg, Addr),
-    Bltu(Reg, Reg, Addr),
-    Bgeu(Reg, Reg, Addr),
+    Jal(Reg, Imm),
+    Jalr(Reg, Reg, Imm),
+    Beq(Reg, Reg, Imm),
+    Bne(Reg, Reg, Imm),
+    Blt(Reg, Reg, Imm),
+    Bge(Reg, Reg, Imm),
+    Bltu(Reg, Reg, Imm),
+    Bgeu(Reg, Reg, Imm),
     Ecall,
 
     Lw(Reg, Offset),
@@ -211,6 +211,14 @@ enum Instr {
     Sltw(Reg, Reg, Reg),
     Sllw(Reg, Reg, Reg),
     Addw(Reg, Reg, Reg),
+
+    Mul(Reg, Reg, Reg),
+    Div(Reg, Reg, Reg),
+    Rem(Reg, Reg, Reg),
+
+    Mulw(Reg, Reg, Reg),
+    Divw(Reg, Reg, Reg),
+    Remw(Reg, Reg, Reg),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -250,7 +258,7 @@ impl Addr {
 }
 
 #[derive(Debug)]
-struct Emulator {
+pub struct Emulator {
     regs: [u64; 32],
     memory_lower: Vec<u8>,
     memory_upper: Vec<u8>,
@@ -259,8 +267,7 @@ struct Emulator {
     exiting: bool,
     exit_code: i32,
 
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+    console: Vec<u8>,
 }
 
 pub const DRAM_OFFSET: u64 = 0x40000000;
@@ -277,8 +284,7 @@ impl Default for Emulator {
             regs: Default::default(),
             exit_code: 0,
             exiting: false,
-            stdout: Vec::new(),
-            stderr: Vec::new(),
+            console: Vec::new(),
         }
     }
 }
@@ -298,6 +304,8 @@ impl Emulator {
             *byte = *b;
         }
         self.pc = offset.val;
+
+        println!("finished!");
     }
 
     /// Run program until the exit ecall is made.
@@ -332,10 +340,10 @@ impl Emulator {
     fn memory(&self, offset: Addr, len: usize) -> &[u8] {
         let start = offset.val as usize;
         let end = offset.val as usize + len;
-        println!(
-            "memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
-            USER_MEMORY_SIZE
-        );
+        // println!(
+        //     "memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
+        //     USER_MEMORY_SIZE
+        // );
 
         if end <= USER_MEMORY_SIZE {
             &self.memory_lower[start..end]
@@ -352,10 +360,10 @@ impl Emulator {
     fn memory_mut(&mut self, offset: Addr, len: usize) -> &mut [u8] {
         let start = offset.val as usize;
         let end = offset.val as usize + len;
-        println!(
-            "mut memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
-            USER_MEMORY_SIZE
-        );
+        // println!(
+        //     "mut memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
+        //     USER_MEMORY_SIZE
+        // );
 
         if end <= USER_MEMORY_SIZE {
             &mut self.memory_lower[start..end]
@@ -366,11 +374,11 @@ impl Emulator {
 
     fn step(&mut self, raw_instr: u32) -> bool {
         if self.exiting {
-            println!("exiting: {}", self.exit_code);
+            // println!("exiting: {}", self.exit_code);
             return false;
         }
 
-        println!("fetching instr: {:#x}:{raw_instr:#x}", self.pc);
+        // println!("fetching instr: {:#x}:{raw_instr:#x}", self.pc);
 
         let opcode = raw_instr & 0b1111111;
         let instr = match opcode {
@@ -381,7 +389,7 @@ impl Emulator {
                 let rs1 = (raw_instr >> 15) & 0b11111;
                 let rs2 = (raw_instr >> 20) & 0b11111;
                 let fn7 = raw_instr >> 25;
-                println!("decoded instr: {fn7:#x} {rs2:#x} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
+                // println!("decoded instr: {fn7:#x} {rs2:#x} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
 
                 let rd = Reg::new(rd);
                 let rs1 = Reg::new(rs1);
@@ -405,6 +413,12 @@ impl Emulator {
                             0b101 => Instr::Sra(rd, rs1, rs2),
                             val => panic!("{val:#b}"),
                         },
+                        0b0000001 => match fn3 {
+                            0b000 => Instr::Mul(rd, rs1, rs2),
+                            0b100 => Instr::Div(rd, rs1, rs2),
+                            0b110 => Instr::Rem(rd, rs1, rs2),
+                            val => panic!("{val:#b}"),
+                        },
                         val => panic!("{val:#b}"),
                     },
                     0b111011 => match fn7 {
@@ -417,6 +431,12 @@ impl Emulator {
                         0b0100000 => match fn3 {
                             0b000 => Instr::Subw(rd, rs1, rs2),
                             0b101 => Instr::Sraw(rd, rs1, rs2),
+                            val => panic!("{val:#b}"),
+                        },
+                        0b0000001 => match fn3 {
+                            0b000 => Instr::Mulw(rd, rs1, rs2),
+                            0b100 => Instr::Divw(rd, rs1, rs2),
+                            0b110 => Instr::Remw(rd, rs1, rs2),
                             val => panic!("{val:#b}"),
                         },
                         val => panic!("{val:#b}"),
@@ -438,7 +458,7 @@ impl Emulator {
                 let imm = Imm::new(imm);
                 let shamt = Imm::Pos(shamt as u64);
 
-                println!("decoded instr: {imm:?} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
+                // println!("decoded instr: {imm:?} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
 
                 let rd = Reg::new(rd);
                 let rs1 = Reg::new(rs1);
@@ -469,7 +489,7 @@ impl Emulator {
                         _ => panic!("{fn3}"),
                     },
                     0b1100111 => match fn3 {
-                        0b000 => Instr::Jalr(rd, rs1, Addr::new_signed(imm.val_signed())),
+                        0b000 => Instr::Jalr(rd, rs1, imm),
                         val => panic!("{val:#b}"),
                     },
                     0b0011011 => match fn3 {
@@ -497,7 +517,7 @@ impl Emulator {
                     Imm::Pos(imm_64 as u64)
                 };
 
-                println!("decoded instr: {imm:?} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
+                // println!("decoded instr: {imm:?} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
 
                 let rs1 = Reg::new(rs1);
                 let rs2 = Reg::new(rs2);
@@ -513,29 +533,35 @@ impl Emulator {
             }
             // B-type
             0x63 => {
-                let imm1 = (raw_instr >> 7) & 0b1;
-                let imm2 = (raw_instr >> 8) & 0b1111;
                 let fn3 = (raw_instr >> 12) & 0b111;
                 let rs1 = (raw_instr >> 15) & 0b11111;
                 let rs2 = (raw_instr >> 20) & 0b11111;
-                let imm3 = (raw_instr >> 25) & 0b111111;
-                let imm4 = (raw_instr >> 31) & 0b1;
 
-                let imm = (imm2 << 1) | (imm3 << 1) | (imm1 << 11) | imm4 << 31;
+                let mut imm: i64 = 0;
+                let raw_instr = raw_instr as i64;
+                imm |= ((raw_instr >> 31) & 0x1) << 12; // imm[12]
+                imm |= ((raw_instr >> 7) & 0x1) << 11; // imm[11]
+                imm |= ((raw_instr >> 25) & 0x3f) << 5; // imm[10:5]
+                imm |= ((raw_instr >> 8) & 0xf) << 1; // imm[4:1]
 
-                println!("decoded instr: {imm:#x} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
+                // Sign extend
+                if (imm & 0x1000) > 0 {
+                    imm = ((imm as u64) | 0xFFFFFFFFFFFFE000) as i64;
+                }
+                let imm = Imm::new(imm);
+
+                // println!("decoded instr: {imm:?} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
 
                 let rs1 = Reg::new(rs1);
                 let rs2 = Reg::new(rs2);
-                let addr = Addr::new_signed(imm as i64);
 
                 match fn3 {
-                    0b000 => Instr::Beq(rs1, rs2, addr),
-                    0b001 => Instr::Bne(rs1, rs2, addr),
-                    0b100 => Instr::Blt(rs1, rs2, addr),
-                    0b101 => Instr::Bge(rs1, rs2, addr),
-                    0b110 => Instr::Bltu(rs1, rs2, addr),
-                    0b111 => Instr::Bgeu(rs1, rs2, addr),
+                    0b000 => Instr::Beq(rs1, rs2, imm),
+                    0b001 => Instr::Bne(rs1, rs2, imm),
+                    0b100 => Instr::Blt(rs1, rs2, imm),
+                    0b101 => Instr::Bge(rs1, rs2, imm),
+                    0b110 => Instr::Bltu(rs1, rs2, imm),
+                    0b111 => Instr::Bgeu(rs1, rs2, imm),
                     val => panic!("{val:#b}"),
                 }
             }
@@ -550,7 +576,7 @@ impl Emulator {
                     Imm::Pos(imm as u64)
                 };
 
-                println!("decoded instr: {imm:?} {rd:#x} {opcode:#x}");
+                // println!("decoded instr: {imm:?} {rd:#x} {opcode:#x}");
 
                 let rd = Reg::new(rd);
 
@@ -563,23 +589,25 @@ impl Emulator {
             // J-type
             0x6F => {
                 let rd = (raw_instr >> 7) & 0b11111;
-                let imm20 = (raw_instr >> 31) & 0x1;
-                let imm10_1 = (raw_instr >> 21) & 0x3ff;
-                let imm11 = (raw_instr >> 20) & 0x1;
-                let imm19_12 = (raw_instr >> 12) & 0xff;
 
-                let mut imm = (imm20 << 20) | (imm19_12 << 12) | (imm11 << 11) | (imm10_1 << 1);
+                let raw_instr = raw_instr as i64;
+                let mut imm = 0;
+                imm |= ((raw_instr >> 31) & 0x1) << 20; // imm[20]
+                imm |= ((raw_instr >> 12) & 0xFF) << 12; // imm[19:12]
+                imm |= ((raw_instr >> 20) & 0x1) << 11; // imm[11]
+                imm |= ((raw_instr >> 21) & 0x3FF) << 1; // imm[10:1]
 
-                if (imm & 0x100000) != 0 {
-                    imm |= 0xffe00000;
+                if (imm & 0x100000) > 0 {
+                    imm = ((imm as u64) | 0xFFFFFFFFFFF00000) as i64
                 }
 
-                println!("decoded instr: {imm:#x} {rd:#x} {opcode:#x}");
+                let imm = Imm::new(imm);
+
+                // println!("decoded instr: {imm:?} {rd:#x} {opcode:#x}");
 
                 let rd = Reg::new(rd);
-                let addr = Addr::new_signed(imm as i64);
 
-                Instr::Jal(rd, addr)
+                Instr::Jal(rd, imm)
             }
             0b1110011 => Instr::Ecall,
             opcode => panic!("invalid opcode: {:#x}", opcode),
@@ -605,18 +633,28 @@ impl Emulator {
         self.regs[reg] as i64
     }
 
-    pub fn add_pc(&mut self, offset: Addr) {
-        self.pc = self.pc.wrapping_add(offset.val);
+    pub fn add_pc(&mut self, offset: Imm) {
+        self.pc = self.pc.wrapping_add(offset.val());
     }
 
-    pub fn read_pc(&self) -> u64 {
+    pub fn read_pc(&mut self) -> u64 {
         self.load(Offset(Reg::Zero, Imm::Pos(self.pc as u64)), 4)
     }
 
-    pub fn load(&self, offset: Offset, bytes: usize) -> u64 {
+    pub fn load(&mut self, offset: Offset, bytes: usize) -> u64 {
         let mut val = 0;
         let offset = self.reg(offset.0).wrapping_add(offset.1.val());
+
+        if offset == 0x0 {
+            self.exiting = true;
+            self.exit_code = 69;
+        } else if offset == 0x1 {
+            self.exiting = true;
+            self.exit_code = 0;
+        }
+
         let memory = self.memory(Addr::new_unsigned(offset as u64), bytes);
+
         for (i, byte) in memory.iter().enumerate() {
             val += (*byte as u64) << (i * 8);
         }
@@ -624,26 +662,23 @@ impl Emulator {
         val
     }
 
-    pub fn load_signed(&self, offset: Offset, bytes: usize) -> i64 {
-        let mut val = 0;
-        let offset = self.reg(offset.0).wrapping_add(offset.1.val());
-        let memory = self.memory(Addr::new_unsigned(offset as u64), bytes);
-        for (i, byte) in memory.iter().enumerate() {
-            val += (*byte as i64) << (i * 8);
-        }
-        val
-    }
-
     pub fn store(&mut self, offset: Offset, bytes: usize, val: u64) {
+        // If the offset is zero, then we are writing to the memory-mapped console.
         let offset = self.reg(offset.0).wrapping_add(offset.1.val());
+
         let memory = self.memory_mut(Addr::new_unsigned(offset as u64), bytes);
         for (i, byte) in memory.iter_mut().enumerate() {
             *byte = (val >> (i * 8)) as u8;
         }
+
+        if offset == 0x4 {
+            let c = self.memory(Addr::new_unsigned(offset), 1)[0];
+            self.console.push(c);
+        }
     }
 
     fn execute(&mut self, instr: Instr) {
-        println!("executing: {instr:?}");
+        println!("\t\texecuting: {instr:?}");
 
         self.set(Reg::Zero, 0);
 
@@ -795,22 +830,28 @@ impl Emulator {
                 self.set(dst, self.reg(src1) & self.reg(src2));
             }
             Instr::Lb(dst, offset) => {
-                self.set_signed(dst, self.load_signed(offset, 1));
+                let val = se_byte(self.load(offset, 1) as u8);
+                self.set_signed(dst, val);
             }
             Instr::Lh(dst, offset) => {
-                self.set_signed(dst, self.load_signed(offset, 2));
+                let val = se_half(self.load(offset, 2) as u16);
+                self.set_signed(dst, val);
             }
             Instr::Lw(dst, offset) => {
-                self.set_signed(dst, self.load_signed(offset, 4));
+                let val = se_word(self.load(offset, 4) as u32);
+                self.set_signed(dst, val);
             }
             Instr::Ld(dst, offset) => {
-                self.set_signed(dst, self.load_signed(offset, 8));
+                let val = self.load(offset, 8);
+                self.set(dst, val);
             }
             Instr::Lbu(dst, offset) => {
-                self.set(dst, self.load(offset, 1));
+                let val = self.load(offset, 1);
+                self.set(dst, val);
             }
             Instr::Lhu(dst, offset) => {
-                self.set(dst, self.load(offset, 2));
+                let val = self.load(offset, 2);
+                self.set(dst, val);
             }
             Instr::Sb(src, offset) => {
                 self.store(offset, 1, self.reg(src));
@@ -826,12 +867,11 @@ impl Emulator {
             }
             Instr::Jal(dst, offset) => {
                 self.set(dst, self.pc + 4);
-                self.pc = ((self.pc as u32).wrapping_add(offset.val as u32)) as u64;
+                self.pc = ((self.pc as u32).wrapping_add(offset.val() as u32)) as u64;
             }
             Instr::Jalr(dst, src, offset) => {
                 self.set(dst, self.pc + 4);
-                let ra = ((self.reg(src) as u32 + offset.val as u32) >> 1) << 1;
-                self.pc = ((self.pc as u32).wrapping_add(ra)) as u64;
+                let ra = ((self.reg(src) as u32 + offset.val() as u32) >> 1) << 1;
                 if ra == 0 {
                     // HACK: main function returns to libc, so unfortunately, it can be assumed
                     // that if the return address is 0, since Reg::Ra will be 0, that we are
@@ -839,52 +879,50 @@ impl Emulator {
 
                     self.exiting = true;
                     self.exit_code = self.reg(Reg::A(0)) as i32;
+                } else {
+                    self.pc = (ra.wrapping_add(offset.val() as u32)) as u64;
                 }
-                // self.execute(Instr::Addi(Reg::T(1), Reg::Zero, Imm::Bin(self.pc as u32)));
-                // self.execute(Instr::Addi(dst, Reg::T(1), Imm::Bin(4)));
-                // let jmp = ((self.reg_signed(src) + offset.signed()) & !1) as u64;
-                // self.pc = jmp;
             }
             Instr::Beq(src1, src2, offset) => {
                 if self.reg(src1) == self.reg(src2) {
                     self.add_pc(offset);
                 } else {
-                    self.add_pc(Addr::new_unsigned(4));
+                    self.add_pc(Imm::new(4));
                 }
             }
             Instr::Bne(src1, src2, offset) => {
                 if self.reg(src1) != self.reg(src2) {
                     self.add_pc(offset);
                 } else {
-                    self.add_pc(Addr::new_unsigned(4));
+                    self.add_pc(Imm::new(4));
                 }
             }
             Instr::Blt(src1, src2, offset) => {
                 if self.reg_signed(src1) < self.reg_signed(src2) {
                     self.add_pc(offset);
                 } else {
-                    self.add_pc(Addr::new_unsigned(4));
+                    self.add_pc(Imm::new(4));
                 }
             }
             Instr::Bge(src1, src2, offset) => {
                 if self.reg_signed(src1) >= self.reg_signed(src2) {
                     self.add_pc(offset);
                 } else {
-                    self.add_pc(Addr::new_unsigned(4));
+                    self.add_pc(Imm::new(4));
                 }
             }
             Instr::Bltu(src1, src2, offset) => {
                 if self.reg(src1) < self.reg(src2) {
                     self.add_pc(offset);
                 } else {
-                    self.add_pc(Addr::new_unsigned(4));
+                    self.add_pc(Imm::new(4));
                 }
             }
             Instr::Bgeu(src1, src2, offset) => {
                 if self.reg(src1) >= self.reg(src2) {
                     self.add_pc(offset);
                 } else {
-                    self.add_pc(Addr::new_unsigned(4));
+                    self.add_pc(Imm::new(4));
                 }
             }
             Instr::Ecall => {
@@ -900,16 +938,36 @@ impl Emulator {
                         1 => {
                             let buf_addr = self.reg(Reg::A(1)) as usize;
                             let buf_len = self.reg(Reg::A(2)) as usize;
-                            println!("writing {} bytes of buf {} to stdout.", buf_len, buf_addr);
+                            // println!("writing {} bytes of buf {} to console.", buf_len, buf_addr);
                             let memory = self
                                 .memory(Addr::new_unsigned(buf_addr as u64), buf_len)
                                 .to_vec();
-                            self.stdout.extend_from_slice(&memory);
+                            self.console.extend_from_slice(&memory);
                         }
                         _ => unimplemented!(),
                     },
                     val => println!("invalid syscall: {}", val),
                 }
+            }
+
+            Instr::Mul(dst, rs1, rs2) => {
+                self.set(dst, (self.reg(rs1) as u32 * self.reg(rs2) as u32) as u64);
+            }
+            Instr::Div(dst, rs1, rs2) => {
+                self.set(dst, (self.reg(rs1) as u32 / self.reg(rs2) as u32) as u64);
+            }
+            Instr::Rem(dst, rs1, rs2) => {
+                self.set(dst, (self.reg(rs1) as u32 % self.reg(rs2) as u32) as u64);
+            }
+
+            Instr::Mulw(dst, rs1, rs2) => {
+                self.set(dst, self.reg(rs1) * self.reg(rs2));
+            }
+            Instr::Divw(dst, rs1, rs2) => {
+                self.set(dst, self.reg(rs1) / self.reg(rs2));
+            }
+            Instr::Remw(dst, rs1, rs2) => {
+                self.set(dst, self.reg(rs1) % self.reg(rs2));
             }
         }
 
@@ -923,7 +981,7 @@ impl Emulator {
             | Instr::Jal(_, _)
             | Instr::Jalr(_, _, _) => {}
             _ => {
-                self.add_pc(Addr::new_unsigned(4));
+                self.add_pc(Imm::new(4));
             }
         }
 
@@ -931,21 +989,43 @@ impl Emulator {
     }
 }
 
-pub fn emulate(prgm: &[u8]) {
+fn se_byte(byte: u8) -> i64 {
+    ((byte as i64) << 56) >> 56
+}
+
+fn se_half(byte: u16) -> i64 {
+    ((byte as i64) << 48) >> 48
+}
+
+fn se_word(byte: u32) -> i64 {
+    ((byte as i64) << 32) >> 32
+}
+
+pub fn run_emulator(prgm: &[u8]) -> Emulator {
     let mut emulator = Emulator::default();
     emulator.flash_prgm(prgm, Addr::new_unsigned(DRAM_OFFSET as u64));
     emulator.set(Reg::Sp, STACK_OFFSET);
     emulator.run();
+    emulator
+}
 
-    for (i, byte) in emulator.memory(Addr::ZERO, 8).iter().enumerate() {
-        println!("mem-{} \t{:#04x}", i, byte);
+pub fn print_emulator(emulator: &Emulator) {
+    println!("Memory:");
+    for mem in 0..8 {
+        print!("{:#09x}\t", mem * 8 * 16);
+        for byte in emulator.memory_lower[mem * 16..mem * 16 + 16].iter() {
+            print!("{:02x} ", byte);
+        }
+        println!();
     }
 
+    println!("\nRegisters:");
     for i in 0..32 {
         println!("x{} \t{:#018x}", i, emulator.regs[i]);
     }
 
-    println!("stdout: {}", String::from_utf8_lossy(&emulator.stdout));
+    println!("\nConsole:\n{}", String::from_utf8_lossy(&emulator.console));
+    println!("\nexit code: {}", emulator.exit_code);
 }
 
 /// https://github.com/d0iasm/rvemu/blob/main/tests/rv32i.rs
@@ -1271,7 +1351,6 @@ mod tests {
 
         let data = vec![
             0x13, 0x08, 0x80, 0x00, // addi x16, x0, 8
-            0x93, 0x08, 0x20, 0x00, // addi x17, x0, 2
             0x33, 0x19, 0x18, 0x01, // sll x18, x16, x17
         ];
         let expected_xregs = create_xregs(vec![(16, 8), (17, 2), (18, 32)]);
