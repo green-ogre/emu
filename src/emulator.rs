@@ -1,267 +1,19 @@
-use std::{
-    fmt::Debug,
-    ops::{Index, IndexMut},
-};
+use crate::instruction_set::*;
+use crate::primitives::*;
 
-#[derive(Debug, Clone, Copy)]
-enum Reg {
-    Zero,
-    Ra,
-    Sp,
-    Gp,
-    Tp,
-    T(usize),
-    S(usize),
-    A(usize),
-}
+pub const CONSOLE_OFFSET: u64 = 0x4;
+pub const HEAP_OFFSET: u64 = 0x8;
+pub const NULL: u64 = 0x0;
+pub const EXIT: u64 = 0x1;
 
-impl Reg {
-    fn new(reg: u32) -> Self {
-        match reg {
-            0 => Self::Zero,
-            1 => Self::Ra,
-            2 => Self::Sp,
-            3 => Self::Gp,
-            4 => Self::Tp,
-            5 => Self::T(0),
-            6 => Self::T(1),
-            7 => Self::T(2),
-            8 => Self::S(0),
-            9 => Self::S(1),
-            10 => Self::A(0),
-            11 => Self::A(1),
-            12 => Self::A(2),
-            13 => Self::A(3),
-            14 => Self::A(4),
-            15 => Self::A(5),
-            16 => Self::A(6),
-            17 => Self::A(7),
-
-            18 => Self::S(2),
-            19 => Self::S(3),
-            20 => Self::S(4),
-            21 => Self::S(5),
-            22 => Self::S(6),
-            23 => Self::S(7),
-            24 => Self::S(8),
-            25 => Self::S(9),
-            26 => Self::S(10),
-            27 => Self::S(11),
-
-            28 => Self::T(3),
-            29 => Self::T(4),
-            30 => Self::T(5),
-            31 => Self::T(6),
-
-            reg => panic!("invalid register: x{reg}"),
-        }
-    }
-
-    fn reg_index(&self) -> usize {
-        match self {
-            Reg::Zero => 0,
-            Reg::Ra => 1,
-            Reg::Sp => 2,
-            Reg::Gp => 3,
-            Reg::Tp => 4,
-            Reg::T(i) => match i {
-                0 => 5,
-                1 => 6,
-                2 => 7,
-                3 => 28,
-                4 => 29,
-                5 => 30,
-                6 => 31,
-                _ => panic!("invalid t register: {i}"),
-            },
-            Reg::S(i) => match i {
-                0 => 8,
-                1 => 9,
-                2 => 18,
-                3 => 19,
-                4 => 20,
-                5 => 21,
-                6 => 22,
-                7 => 23,
-                8 => 24,
-                9 => 25,
-                10 => 26,
-                11 => 27,
-                _ => panic!("invalid t register: {i}"),
-            },
-            Reg::A(i) => match i {
-                0 => 10,
-                1 => 11,
-                2 => 12,
-                3 => 13,
-                4 => 14,
-                5 => 15,
-                6 => 16,
-                7 => 17,
-                _ => panic!("invalid t register: {i}"),
-            },
-        }
-    }
-}
-
-impl Index<Reg> for [u64; 32] {
-    type Output = u64;
-    fn index(&self, index: Reg) -> &Self::Output {
-        &self[index.reg_index()]
-    }
-}
-
-impl IndexMut<Reg> for [u64; 32] {
-    fn index_mut(&mut self, index: Reg) -> &mut Self::Output {
-        &mut self[index.reg_index()]
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Imm {
-    Pos(u64),
-    Neg(u64),
-}
-
-impl Debug for Imm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Pos(val) => f.debug_tuple("Imm").field(val).finish(),
-            Self::Neg(val) => f.debug_tuple("Imm").field(&(*val as i64)).finish(),
-        }
-    }
-}
-
-impl Imm {
-    pub const ZERO: Self = Self::Pos(0);
-
-    pub fn new(imm: i64) -> Self {
-        if imm < 0 {
-            Self::Neg(imm as u64)
-        } else {
-            Self::Pos(imm as u64)
-        }
-    }
-
-    pub fn val(&self) -> u64 {
-        *match self {
-            Self::Pos(val) => val,
-            Self::Neg(val) => val,
-        }
-    }
-
-    pub fn val_signed(&self) -> i64 {
-        match self {
-            Self::Pos(val) => *val as i64,
-            Self::Neg(val) => *val as i64,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Offset(Reg, Imm);
-
-#[derive(Debug)]
-enum Instr {
-    Addi(Reg, Reg, Imm),
-    Addiw(Reg, Reg, Imm),
-    Lui(Reg, Imm),
-    Auipc(Reg, Imm),
-    Slti(Reg, Reg, Imm),
-    Sltiu(Reg, Reg, Imm),
-    Xori(Reg, Reg, Imm),
-    Ori(Reg, Reg, Imm),
-    Andi(Reg, Reg, Imm),
-    Slli(Reg, Reg, Imm),
-    Srli(Reg, Reg, Imm),
-    Srai(Reg, Reg, Imm),
-    Add(Reg, Reg, Reg),
-    Sub(Reg, Reg, Reg),
-    Sll(Reg, Reg, Reg),
-    Slt(Reg, Reg, Reg),
-    Sltu(Reg, Reg, Reg),
-    Xor(Reg, Reg, Reg),
-    Srl(Reg, Reg, Reg),
-    Sra(Reg, Reg, Reg),
-    Or(Reg, Reg, Reg),
-    And(Reg, Reg, Reg),
-    Lb(Reg, Offset),
-    Lh(Reg, Offset),
-    Ld(Reg, Offset),
-    Lbu(Reg, Offset),
-    Lhu(Reg, Offset),
-    Sb(Reg, Offset),
-    Sh(Reg, Offset),
-    Sd(Reg, Offset),
-    Jal(Reg, Imm),
-    Jalr(Reg, Reg, Imm),
-    Beq(Reg, Reg, Imm),
-    Bne(Reg, Reg, Imm),
-    Blt(Reg, Reg, Imm),
-    Bge(Reg, Reg, Imm),
-    Bltu(Reg, Reg, Imm),
-    Bgeu(Reg, Reg, Imm),
-    Ecall,
-
-    Lw(Reg, Offset),
-    Sw(Reg, Offset),
-    Subw(Reg, Reg, Reg),
-    Srlw(Reg, Reg, Reg),
-    Sraw(Reg, Reg, Reg),
-    Sltw(Reg, Reg, Reg),
-    Sllw(Reg, Reg, Reg),
-    Addw(Reg, Reg, Reg),
-
-    Mul(Reg, Reg, Reg),
-    Div(Reg, Reg, Reg),
-    Rem(Reg, Reg, Reg),
-
-    Mulw(Reg, Reg, Reg),
-    Divw(Reg, Reg, Reg),
-    Remw(Reg, Reg, Reg),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Addr {
-    val: u64,
-    signed: bool,
-}
-
-impl Addr {
-    pub const ZERO: Self = Self {
-        val: 0,
-        signed: false,
-    };
-
-    pub fn new_unsigned(val: u64) -> Self {
-        Self { val, signed: false }
-    }
-
-    pub fn new_signed(val: i64) -> Self {
-        Self {
-            val: val as u64,
-            signed: true,
-        }
-    }
-
-    pub fn is_signed(&self) -> bool {
-        self.signed
-    }
-
-    pub fn signed(&self) -> i64 {
-        if !self.is_signed() {
-            println!("retrieved signed value from unsigned addr");
-        }
-
-        self.val as i64
-    }
-}
+pub const DRAM_OFFSET: u64 = 0x40000000;
+pub const STACK_OFFSET: u64 = USER_MEMORY_SIZE as u64;
+pub const USER_MEMORY_SIZE: usize = u32::MAX as usize;
 
 #[derive(Debug)]
 pub struct Emulator {
     regs: [u64; 32],
-    memory_lower: Vec<u8>,
-    memory_upper: Vec<u8>,
+    memory: Vec<u8>,
     pc: u64,
 
     exiting: bool,
@@ -270,17 +22,11 @@ pub struct Emulator {
     console: Vec<u8>,
 }
 
-pub const DRAM_OFFSET: u64 = 0x40000000;
-pub const STACK_OFFSET: u64 = SEG_LEN;
-pub const USER_MEMORY_SIZE: usize = u32::MAX as usize;
-pub const SEG_LEN: u64 = u32::MAX as u64;
-
 impl Default for Emulator {
     fn default() -> Self {
         Self {
             pc: 0,
-            memory_lower: vec![0; SEG_LEN as usize],
-            memory_upper: vec![0; SEG_LEN as usize],
+            memory: vec![0; USER_MEMORY_SIZE as usize],
             regs: Default::default(),
             exit_code: 0,
             exiting: false,
@@ -292,8 +38,8 @@ impl Default for Emulator {
 impl Emulator {
     /// Load program data into memory at offset [`Addr`].
     ///
-    /// Subsequently sets pc to offset. Ignores sign.
-    pub fn flash_prgm(&mut self, prgm: &[u8], offset: Addr) {
+    /// Subsequently sets pc to offset.
+    pub fn flash_prgm(&mut self, prgm: &[u8], offset: u32) {
         println!("flashing program...");
 
         for (byte, b) in self
@@ -303,7 +49,7 @@ impl Emulator {
         {
             *byte = *b;
         }
-        self.pc = offset.val;
+        self.pc = offset as u64;
 
         println!("finished!");
     }
@@ -319,6 +65,7 @@ impl Emulator {
     }
 
     /// Run program until iterations is reached or the exit ecall made.
+    #[allow(unused)]
     pub fn run_for(&mut self, mut iterations: usize) {
         loop {
             let raw_instr = self.read_pc();
@@ -336,17 +83,17 @@ impl Emulator {
 
     /// Slice of memory at location [`Addr`].
     ///
-    /// Sign of offset is ignored.
-    fn memory(&self, offset: Addr, len: usize) -> &[u8] {
-        let start = offset.val as usize;
-        let end = offset.val as usize + len;
+    /// User address space: 0..[`u32::MAX`].
+    fn memory(&self, offset: u32, len: usize) -> &[u8] {
+        let start = offset as usize;
+        let end = offset as usize + len;
         // println!(
         //     "memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
         //     USER_MEMORY_SIZE
         // );
 
         if end <= USER_MEMORY_SIZE {
-            &self.memory_lower[start..end]
+            &self.memory[start..end]
         } else {
             panic!("SEGFAULT");
         }
@@ -354,19 +101,17 @@ impl Emulator {
 
     /// Slice of mutable memory at location [`Addr`].
     ///
-    /// Sign of offset is ignored.
-    ///
     /// User address space: 0..[`u32::MAX`].
-    fn memory_mut(&mut self, offset: Addr, len: usize) -> &mut [u8] {
-        let start = offset.val as usize;
-        let end = offset.val as usize + len;
+    fn memory_mut(&mut self, offset: u32, len: usize) -> &mut [u8] {
+        let start = offset as usize;
+        let end = offset as usize + len;
         // println!(
         //     "mut memory fetch => start: {start:#x}: end {end:#x} max: {:#x}",
         //     USER_MEMORY_SIZE
         // );
 
         if end <= USER_MEMORY_SIZE {
-            &mut self.memory_lower[start..end]
+            &mut self.memory[start..end]
         } else {
             panic!("segfault");
         }
@@ -380,238 +125,7 @@ impl Emulator {
 
         // println!("fetching instr: {:#x}:{raw_instr:#x}", self.pc);
 
-        let opcode = raw_instr & 0b1111111;
-        let instr = match opcode {
-            // R-type
-            0x33 | 0b111011 => {
-                let rd = (raw_instr >> 7) & 0b11111;
-                let fn3 = (raw_instr >> 12) & 0b111;
-                let rs1 = (raw_instr >> 15) & 0b11111;
-                let rs2 = (raw_instr >> 20) & 0b11111;
-                let fn7 = raw_instr >> 25;
-                // println!("decoded instr: {fn7:#x} {rs2:#x} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
-
-                let rd = Reg::new(rd);
-                let rs1 = Reg::new(rs1);
-                let rs2 = Reg::new(rs2);
-
-                match opcode {
-                    0x33 => match fn7 {
-                        0b0000000 => match fn3 {
-                            0b000 => Instr::Add(rd, rs1, rs2),
-                            0b001 => Instr::Sll(rd, rs1, rs2),
-                            0b010 => Instr::Slt(rd, rs1, rs2),
-                            0b011 => Instr::Sltu(rd, rs1, rs2),
-                            0b100 => Instr::Xor(rd, rs1, rs2),
-                            0b101 => Instr::Srl(rd, rs1, rs2),
-                            0b110 => Instr::Or(rd, rs1, rs2),
-                            0b111 => Instr::And(rd, rs1, rs2),
-                            val => panic!("{val:#b}"),
-                        },
-                        0b0100000 => match fn3 {
-                            0b000 => Instr::Sub(rd, rs1, rs2),
-                            0b101 => Instr::Sra(rd, rs1, rs2),
-                            val => panic!("{val:#b}"),
-                        },
-                        0b0000001 => match fn3 {
-                            0b000 => Instr::Mul(rd, rs1, rs2),
-                            0b100 => Instr::Div(rd, rs1, rs2),
-                            0b110 => Instr::Rem(rd, rs1, rs2),
-                            val => panic!("{val:#b}"),
-                        },
-                        val => panic!("{val:#b}"),
-                    },
-                    0b111011 => match fn7 {
-                        0b000 => match fn3 {
-                            0b000 => Instr::Addw(rd, rs1, rs2),
-                            0b001 => Instr::Sllw(rd, rs1, rs2),
-                            0b101 => Instr::Srlw(rd, rs1, rs2),
-                            val => panic!("{val:#b}"),
-                        },
-                        0b0100000 => match fn3 {
-                            0b000 => Instr::Subw(rd, rs1, rs2),
-                            0b101 => Instr::Sraw(rd, rs1, rs2),
-                            val => panic!("{val:#b}"),
-                        },
-                        0b0000001 => match fn3 {
-                            0b000 => Instr::Mulw(rd, rs1, rs2),
-                            0b100 => Instr::Divw(rd, rs1, rs2),
-                            0b110 => Instr::Remw(rd, rs1, rs2),
-                            val => panic!("{val:#b}"),
-                        },
-                        val => panic!("{val:#b}"),
-                    },
-                    val => panic!("{val:#b}"),
-                }
-            }
-            // I-type
-            0x03 | 0x67 | 0x13 | 0b0011011 => {
-                let rd = (raw_instr >> 7) & 0b11111;
-                let fn3 = (raw_instr >> 12) & 0b111;
-                let rs1 = (raw_instr >> 15) & 0b11111;
-                let imm = ((raw_instr as i32) >> 20) as i64;
-
-                // For shifting ops
-                let shamt = (raw_instr >> 20) & 0b11111;
-                let fn7 = (raw_instr >> 25) & 0b1111111;
-
-                let imm = Imm::new(imm);
-                let shamt = Imm::Pos(shamt as u64);
-
-                // println!("decoded instr: {imm:?} {rs1:#x} {fn3:#x} {rd:#x} {opcode:#x}");
-
-                let rd = Reg::new(rd);
-                let rs1 = Reg::new(rs1);
-
-                match opcode {
-                    0b0000011 => match fn3 {
-                        0b000 => Instr::Lb(rd, Offset(rs1, imm)),
-                        0b001 => Instr::Lh(rd, Offset(rs1, imm)),
-                        0b010 => Instr::Lw(rd, Offset(rs1, imm)),
-                        0b011 => Instr::Ld(rd, Offset(rs1, imm)),
-                        0b100 => Instr::Lbu(rd, Offset(rs1, imm)),
-                        0b101 => Instr::Lhu(rd, Offset(rs1, imm)),
-                        val => panic!("{val:#b}"),
-                    },
-                    0b0010011 => match fn3 {
-                        0b000 => Instr::Addi(rd, rs1, imm),
-                        0b010 => Instr::Slti(rd, rs1, imm),
-                        0b011 => Instr::Sltiu(rd, rs1, imm),
-                        0b100 => Instr::Xori(rd, rs1, imm),
-                        0b110 => Instr::Ori(rd, rs1, imm),
-                        0b111 => Instr::Andi(rd, rs1, imm),
-                        0b001 => Instr::Slli(rd, rs1, shamt),
-                        0b101 => match fn7 {
-                            0b0100000 => Instr::Srai(rd, rs1, shamt),
-                            0b0000000 => Instr::Srli(rd, rs1, shamt),
-                            val => panic!("{val:#b}"),
-                        },
-                        _ => panic!("{fn3}"),
-                    },
-                    0b1100111 => match fn3 {
-                        0b000 => Instr::Jalr(rd, rs1, imm),
-                        val => panic!("{val:#b}"),
-                    },
-                    0b0011011 => match fn3 {
-                        0b000 => Instr::Addiw(rd, rs1, imm),
-                        val => panic!("{val:#b}"),
-                    },
-                    val => panic!("{val:#b}"),
-                }
-            }
-            // S-type
-            0x23 => {
-                let fn3 = (raw_instr >> 12) & 0b111;
-                let rs1 = (raw_instr >> 15) & 0b11111;
-                let rs2 = (raw_instr >> 20) & 0b11111;
-
-                let imm_11_5 = (raw_instr >> 25) & 0x7F;
-                let imm_4_0 = (raw_instr >> 7) & 0x1F;
-
-                let imm_12bit = (imm_11_5 << 5) | imm_4_0;
-
-                let imm_64 = ((imm_12bit as i64) << 52) >> 52;
-                let imm = if imm_64 < 0 {
-                    Imm::Neg(imm_64 as u64)
-                } else {
-                    Imm::Pos(imm_64 as u64)
-                };
-
-                // println!("decoded instr: {imm:?} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
-
-                let rs1 = Reg::new(rs1);
-                let rs2 = Reg::new(rs2);
-                let offset = Offset(rs1, imm);
-
-                match fn3 {
-                    0b000 => Instr::Sb(rs2, offset),
-                    0b001 => Instr::Sh(rs2, offset),
-                    0b010 => Instr::Sw(rs2, offset),
-                    0b011 => Instr::Sd(rs2, offset),
-                    val => panic!("{val:#b}"),
-                }
-            }
-            // B-type
-            0x63 => {
-                let fn3 = (raw_instr >> 12) & 0b111;
-                let rs1 = (raw_instr >> 15) & 0b11111;
-                let rs2 = (raw_instr >> 20) & 0b11111;
-
-                let mut imm: i64 = 0;
-                let raw_instr = raw_instr as i64;
-                imm |= ((raw_instr >> 31) & 0x1) << 12; // imm[12]
-                imm |= ((raw_instr >> 7) & 0x1) << 11; // imm[11]
-                imm |= ((raw_instr >> 25) & 0x3f) << 5; // imm[10:5]
-                imm |= ((raw_instr >> 8) & 0xf) << 1; // imm[4:1]
-
-                // Sign extend
-                if (imm & 0x1000) > 0 {
-                    imm = ((imm as u64) | 0xFFFFFFFFFFFFE000) as i64;
-                }
-                let imm = Imm::new(imm);
-
-                // println!("decoded instr: {imm:?} {rs2:#x} {rs1:#x} {fn3:#x} {opcode:#x}");
-
-                let rs1 = Reg::new(rs1);
-                let rs2 = Reg::new(rs2);
-
-                match fn3 {
-                    0b000 => Instr::Beq(rs1, rs2, imm),
-                    0b001 => Instr::Bne(rs1, rs2, imm),
-                    0b100 => Instr::Blt(rs1, rs2, imm),
-                    0b101 => Instr::Bge(rs1, rs2, imm),
-                    0b110 => Instr::Bltu(rs1, rs2, imm),
-                    0b111 => Instr::Bgeu(rs1, rs2, imm),
-                    val => panic!("{val:#b}"),
-                }
-            }
-            // U-type
-            0x37 | 0x17 => {
-                let rd = (raw_instr >> 7) & 0b11111;
-                let imm = (raw_instr >> 12) << 12;
-
-                let imm = if imm & 0x800 != 0 {
-                    Imm::Neg((imm as u64) | 0xFFFFFFFFFFFFF000u64)
-                } else {
-                    Imm::Pos(imm as u64)
-                };
-
-                // println!("decoded instr: {imm:?} {rd:#x} {opcode:#x}");
-
-                let rd = Reg::new(rd);
-
-                match opcode {
-                    0b0110111 => Instr::Lui(rd, imm),
-                    0b0010111 => Instr::Auipc(rd, imm),
-                    val => panic!("{val:#b}"),
-                }
-            }
-            // J-type
-            0x6F => {
-                let rd = (raw_instr >> 7) & 0b11111;
-
-                let raw_instr = raw_instr as i64;
-                let mut imm = 0;
-                imm |= ((raw_instr >> 31) & 0x1) << 20; // imm[20]
-                imm |= ((raw_instr >> 12) & 0xFF) << 12; // imm[19:12]
-                imm |= ((raw_instr >> 20) & 0x1) << 11; // imm[11]
-                imm |= ((raw_instr >> 21) & 0x3FF) << 1; // imm[10:1]
-
-                if (imm & 0x100000) > 0 {
-                    imm = ((imm as u64) | 0xFFFFFFFFFFF00000) as i64
-                }
-
-                let imm = Imm::new(imm);
-
-                // println!("decoded instr: {imm:?} {rd:#x} {opcode:#x}");
-
-                let rd = Reg::new(rd);
-
-                Instr::Jal(rd, imm)
-            }
-            0b1110011 => Instr::Ecall,
-            opcode => panic!("invalid opcode: {:#x}", opcode),
-        };
+        let instr = crate::decoding::decode(raw_instr);
 
         self.execute(instr);
         true
@@ -645,15 +159,15 @@ impl Emulator {
         let mut val = 0;
         let offset = self.reg(offset.0).wrapping_add(offset.1.val());
 
-        if offset == 0x0 {
+        if offset == NULL {
             self.exiting = true;
-            self.exit_code = 69;
-        } else if offset == 0x1 {
+            self.exit_code = 139;
+        } else if offset == EXIT {
             self.exiting = true;
             self.exit_code = 0;
         }
 
-        let memory = self.memory(Addr::new_unsigned(offset as u64), bytes);
+        let memory = self.memory(offset as u32, bytes);
 
         for (i, byte) in memory.iter().enumerate() {
             val += (*byte as u64) << (i * 8);
@@ -663,17 +177,15 @@ impl Emulator {
     }
 
     pub fn store(&mut self, offset: Offset, bytes: usize, val: u64) {
-        // If the offset is zero, then we are writing to the memory-mapped console.
         let offset = self.reg(offset.0).wrapping_add(offset.1.val());
 
-        let memory = self.memory_mut(Addr::new_unsigned(offset as u64), bytes);
+        let memory = self.memory_mut(offset as u32, bytes);
         for (i, byte) in memory.iter_mut().enumerate() {
             *byte = (val >> (i * 8)) as u8;
         }
 
-        if offset == 0x4 {
-            let c = self.memory(Addr::new_unsigned(offset), 1)[0];
-            self.console.push(c);
+        if offset == CONSOLE_OFFSET {
+            self.console.push(self.memory(offset as u32, 1)[0]);
         }
     }
 
@@ -837,10 +349,6 @@ impl Emulator {
                 let val = se_half(self.load(offset, 2) as u16);
                 self.set_signed(dst, val);
             }
-            Instr::Lw(dst, offset) => {
-                let val = se_word(self.load(offset, 4) as u32);
-                self.set_signed(dst, val);
-            }
             Instr::Ld(dst, offset) => {
                 let val = self.load(offset, 8);
                 self.set(dst, val);
@@ -939,15 +447,37 @@ impl Emulator {
                             let buf_addr = self.reg(Reg::A(1)) as usize;
                             let buf_len = self.reg(Reg::A(2)) as usize;
                             // println!("writing {} bytes of buf {} to console.", buf_len, buf_addr);
-                            let memory = self
-                                .memory(Addr::new_unsigned(buf_addr as u64), buf_len)
-                                .to_vec();
+                            let memory = self.memory(buf_addr as u32, buf_len).to_vec();
                             self.console.extend_from_slice(&memory);
                         }
                         _ => unimplemented!(),
                     },
                     val => println!("invalid syscall: {}", val),
                 }
+            }
+
+            Instr::Lw(dst, offset) => {
+                let val = se_word(self.load(offset, 4) as u32);
+                self.set_signed(dst, val);
+            }
+            Instr::Lwu(dst, offset) => {
+                let val = self.load(offset, 4) as u64;
+                self.set(dst, val);
+            }
+            Instr::Slliw(dst, rs1, imm) => {
+                let val = self.reg(rs1) as u32;
+                let result = val.wrapping_shl(imm.val() as u32);
+                self.set_signed(dst, result as i32 as i64);
+            }
+            Instr::Srliw(dst, rs1, imm) => {
+                let val = self.reg(rs1) as u32;
+                let result = val.wrapping_shr(imm.val() as u32);
+                self.set_signed(dst, result as i32 as i64);
+            }
+            Instr::Sraiw(dst, rs1, imm) => {
+                let val = self.reg(rs1) as i32;
+                let result = val.wrapping_shr(imm.val() as u32);
+                self.set_signed(dst, result as i64);
             }
 
             Instr::Mul(dst, rs1, rs2) => {
@@ -1003,29 +533,30 @@ fn se_word(byte: u32) -> i64 {
 
 pub fn run_emulator(prgm: &[u8]) -> Emulator {
     let mut emulator = Emulator::default();
-    emulator.flash_prgm(prgm, Addr::new_unsigned(DRAM_OFFSET as u64));
+    emulator.flash_prgm(prgm, DRAM_OFFSET as u32);
     emulator.set(Reg::Sp, STACK_OFFSET);
     emulator.run();
     emulator
 }
 
 pub fn print_emulator(emulator: &Emulator) {
-    println!("Memory:");
-    for mem in 0..8 {
-        print!("{:#09x}\t", mem * 8 * 16);
-        for byte in emulator.memory_lower[mem * 16..mem * 16 + 16].iter() {
-            print!("{:02x} ", byte);
-        }
-        println!();
-    }
-
-    println!("\nRegisters:");
+    println!("Registers:");
     for i in 0..32 {
         println!("x{} \t{:#018x}", i, emulator.regs[i]);
     }
 
+    println!("\nHeap:");
+    for mem in 0..8 {
+        print!("{:#09x}\t", mem * 8 * 16 + HEAP_OFFSET as usize);
+        let index = mem * 16 + HEAP_OFFSET as usize;
+        for byte in emulator.memory[index..index + 16].iter() {
+            print!("{:02X} ", byte);
+        }
+        println!();
+    }
+
     println!("\nConsole:\n{}", String::from_utf8_lossy(&emulator.console));
-    println!("\nexit code: {}", emulator.exit_code);
+    // println!("\nexit code: {}", emulator.exit_code);
 }
 
 /// https://github.com/d0iasm/rvemu/blob/main/tests/rv32i.rs
@@ -1052,7 +583,7 @@ mod tests {
 
     /// Start a test and check if the registers are expected.
     pub fn run(emulator: &mut Emulator, data: Vec<u8>, expected_xregs: &[u64; 32]) {
-        emulator.flash_prgm(&data, Addr::new_unsigned(0));
+        emulator.flash_prgm(&data, 0);
         emulator.run_for(data.len() / 4);
 
         for (i, e) in expected_xregs.iter().enumerate() {
