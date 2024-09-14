@@ -3,8 +3,10 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#pragma GCC diagnostic ignored "-Warray-bounds"
 
-__attribute__((optimize("O0"))) void *memset(void *s, int c, size_t n) {
+void *memset(void *s, int c, size_t n)
+{
     unsigned char *p = (unsigned char *)s;
     while (n--) {
         *p++ = (unsigned char)c;
@@ -12,9 +14,8 @@ __attribute__((optimize("O0"))) void *memset(void *s, int c, size_t n) {
     return s;
 }
 
-void memcpy(void *dst, const void *src, int bytes) {
-    // printf("memcpy: dst: %i, src: %i, bytes: %i\n", dst, src, bytes);
-
+void memcpy(void *dst, const void *src, int bytes)
+{
     uint8_t *d = (uint8_t *)dst;
     const uint8_t *s = (uint8_t *)src;
 
@@ -23,7 +24,8 @@ void memcpy(void *dst, const void *src, int bytes) {
     }
 }
 
-void print_vec(const Vec *v) {
+void print_vec(const Vec *v)
+{
     printf("Vec { cap: %i, len: %i, item_size: %i, data: %i }\n",
            v->cap,
            v->len,
@@ -31,7 +33,8 @@ void print_vec(const Vec *v) {
            v->data);
 }
 
-Vec new_vec(uint32_t item_size, uint32_t init_capacity) {
+Vec new_vec(uint32_t item_size, uint32_t init_capacity)
+{
     Vec vec = {};
     vec.cap = init_capacity;
     vec.item_size = item_size;
@@ -39,7 +42,8 @@ Vec new_vec(uint32_t item_size, uint32_t init_capacity) {
     return vec;
 }
 
-void push_vec(Vec *vec, const void *item) {
+void push_vec(Vec *vec, const void *item)
+{
     if (vec->len < vec->cap) {
         memcpy((uint8_t *)vec->data + (vec->len * vec->item_size),
                item,
@@ -48,8 +52,8 @@ void push_vec(Vec *vec, const void *item) {
     }
 }
 
-// 12 kb
-#define MEMORY_SIZE 12000
+// 64 kb
+#define MEMORY_SIZE 64000
 
 // Memory-mapped heap.
 #define HEAP (volatile uint8_t *)HEAP_OFFSET
@@ -64,11 +68,8 @@ struct Alloc {
 
 static Alloc *alloc = (Alloc *)(HEAP);
 
-static void zero_mem(void *ptr, int bytes) {
-    memset(ptr, 0, bytes);
-}
-
-static void allocate(Alloc *a, int bytes) {
+static void allocate(Alloc *a, int bytes)
+{
     printf("Allocating %i bytes...\n", bytes);
 
     Alloc new_alloc = {};
@@ -85,13 +86,14 @@ static void allocate(Alloc *a, int bytes) {
     *((Alloc *)(HEAP + new_alloc.offset)) = new_alloc;
 
 #if DEBUG == 1
-    zero_mem((void *)((uint8_t *)a + sizeof(Alloc)), a->size - sizeof(Alloc));
+    memset((void *)((uint8_t *)a + sizeof(Alloc)), 0, a->size - sizeof(Alloc));
 #endif
 
     a->next = (Alloc *)(HEAP + new_alloc.offset);
 }
 
-static void reuse_allocation(Alloc *a, int bytes) {
+static void reuse_allocation(Alloc *a, int bytes)
+{
     assert((uint8_t)bytes <= a->size - sizeof(Alloc));
 
     printf("Allocating %i bytes...\n", bytes);
@@ -100,7 +102,7 @@ static void reuse_allocation(Alloc *a, int bytes) {
     a->is_free = 0;
 
 #if DEBUG == 1
-    zero_mem((void *)((uint8_t *)a + sizeof(Alloc)), a->size - sizeof(Alloc));
+    memset((void *)((uint8_t *)a + sizeof(Alloc)), 0, a->size - sizeof(Alloc));
 #endif
 
     printf("Alloc header size: %i, Allocation size: %i, Offset: %i\n",
@@ -109,7 +111,8 @@ static void reuse_allocation(Alloc *a, int bytes) {
            a->offset + HEAP_OFFSET);
 }
 
-void *malloc(int bytes) {
+void *malloc(int bytes)
+{
     Alloc *head = alloc;
 
     if (!head->next) {
@@ -134,7 +137,8 @@ void *malloc(int bytes) {
     }
 }
 
-void free(void *block) {
+void free(void *block)
+{
     Alloc *a = (Alloc *)((uint8_t *)block - sizeof(Alloc));
     printf("Freeing allocation...\n");
     printf("Alloc header size: %i, Allocation size: %i, Offset: %i\n",
@@ -147,20 +151,20 @@ void free(void *block) {
     uint8_t *mem = (uint8_t *)a + sizeof(Alloc);
     for (uint8_t i = 0; i < a->size - sizeof(Alloc); i++) {
         switch (i % 4) {
-        case 0:
-            mem[i] = 0xDE;
-            break;
-        case 1:
-            mem[i] = 0xAD;
-            break;
-        case 2:
-            mem[i] = 0xBE;
-            break;
-        case 3:
-            mem[i] = 0xEF;
-            break;
-        default:
-            break;
+            case 0:
+                mem[i] = 0xDE;
+                break;
+            case 1:
+                mem[i] = 0xAD;
+                break;
+            case 2:
+                mem[i] = 0xBE;
+                break;
+            case 3:
+                mem[i] = 0xEF;
+                break;
+            default:
+                break;
         }
     }
 #endif
@@ -170,17 +174,20 @@ void free(void *block) {
 #define CONSOLE_OUT (*((volatile uint8_t *)CONSOLE_OFFSET))
 #define CONSOLE_OFFSET 0x4
 
-static void print_char(char c) {
+static void print_char(char c)
+{
     CONSOLE_OUT = c;
 }
 
-static void print_str(const char *str) {
+static void print_str(const char *str)
+{
     while (*str != '\0') {
         print_char(*str++);
     }
 }
 
-static void print_int(int i) {
+static void print_int(int i)
+{
     if (i == 0) {
         char str[2];
         str[0] = '0';
@@ -206,7 +213,8 @@ static void print_int(int i) {
     print_str(str);
 }
 
-void print_address(uintptr_t addr) {
+void print_address(uintptr_t addr)
+{
     char hex_chars[] = "0123456789abcdef";
     char buffer[sizeof(void *) * 2 + 3];
     int idx = sizeof(buffer) - 1;
@@ -224,7 +232,8 @@ void print_address(uintptr_t addr) {
     print_str(buffer);
 }
 
-void printf(const char *fmt, ...) {
+void printf(const char *fmt, ...)
+{
     va_list listp;
 
     va_start(listp, fmt);
@@ -253,8 +262,9 @@ void printf(const char *fmt, ...) {
 
 extern int main();
 
-void __attribute__((naked, noreturn, section(".text.entry"))) _start() {
-    int exit_code = main();
-    printf("\n\nexit code: %i\n", exit_code);
-    EXIT;
+void __attribute__((naked, noreturn, section(".text.entry"))) _start()
+{
+    asm volatile("call main");
+    // Emu will exit gracefully upon reading from 0x1
+    asm volatile("lw x0, 0x1(x0)");
 }

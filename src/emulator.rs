@@ -3,8 +3,11 @@ use crate::primitives::*;
 
 pub const CONSOLE_OFFSET: u64 = 0x4;
 pub const HEAP_OFFSET: u64 = 0x8;
+pub const SCREEN_OFFSET: u32 = 0xFA08;
+pub const SCREEN_SIZE: usize = 320 * 200;
 pub const NULL: u64 = 0x0;
 pub const EXIT: u64 = 0x1;
+pub const RENDER: u64 = 0x2;
 
 pub const DRAM_OFFSET: u64 = 0x40000000;
 pub const STACK_OFFSET: u64 = USER_MEMORY_SIZE as u64;
@@ -16,6 +19,9 @@ pub struct Emulator {
     memory: Vec<u8>,
     pc: u64,
 
+    current_instr: Instr,
+
+    render: bool,
     exiting: bool,
     exit_code: i32,
 
@@ -28,14 +34,37 @@ impl Default for Emulator {
             pc: 0,
             memory: vec![0; USER_MEMORY_SIZE as usize],
             regs: Default::default(),
+            render: false,
             exit_code: 0,
             exiting: false,
+            current_instr: Instr::Ecall,
             console: Vec::new(),
         }
     }
 }
 
 impl Emulator {
+    pub fn current_instruction(&self) -> &Instr {
+        &self.current_instr
+    }
+
+    pub fn console(&self) -> &[u8] {
+        &self.console
+    }
+
+    pub fn should_render(&mut self) -> bool {
+        let render = self.render;
+        if render {
+            self.render = false;
+        }
+
+        render
+    }
+
+    pub fn finished(&self) -> bool {
+        self.exiting
+    }
+
     /// Load program data into memory at offset [`Addr`].
     ///
     /// Subsequently sets pc to offset.
@@ -57,11 +86,13 @@ impl Emulator {
     /// Run program until the exit ecall is made.
     pub fn run(&mut self) {
         loop {
-            let raw_instr = self.read_pc();
-            if !self.step(raw_instr as u32) {
-                return;
-            }
+            self.run_next();
         }
+    }
+
+    pub fn run_next(&mut self) {
+        let raw_instr = self.read_pc();
+        self.step(raw_instr as u32);
     }
 
     /// Run program until iterations is reached or the exit ecall made.
@@ -84,7 +115,7 @@ impl Emulator {
     /// Slice of memory at location [`Addr`].
     ///
     /// User address space: 0..[`u32::MAX`].
-    fn memory(&self, offset: u32, len: usize) -> &[u8] {
+    pub fn memory(&self, offset: u32, len: usize) -> &[u8] {
         let start = offset as usize;
         let end = offset as usize + len;
         // println!(
@@ -127,6 +158,8 @@ impl Emulator {
 
         let instr = crate::decoding::decode(raw_instr);
 
+        self.current_instr = instr;
+
         self.execute(instr);
         true
     }
@@ -152,7 +185,16 @@ impl Emulator {
     }
 
     pub fn read_pc(&mut self) -> u64 {
-        self.load(Offset(Reg::Zero, Imm::Pos(self.pc as u64)), 4)
+        let mut val = 0;
+        let offset = self.pc;
+
+        let memory = self.memory(offset as u32, 4);
+
+        for (i, byte) in memory.iter().enumerate() {
+            val += (*byte as u64) << (i * 8);
+        }
+
+        val
     }
 
     pub fn load(&mut self, offset: Offset, bytes: usize) -> u64 {
@@ -164,7 +206,9 @@ impl Emulator {
             self.exit_code = 139;
         } else if offset == EXIT {
             self.exiting = true;
-            self.exit_code = 0;
+            self.exit_code = self.reg(Reg::A(0)) as i32;
+        } else if offset == RENDER {
+            self.render = true;
         }
 
         let memory = self.memory(offset as u32, bytes);
@@ -190,7 +234,7 @@ impl Emulator {
     }
 
     fn execute(&mut self, instr: Instr) {
-        println!("\t\texecuting: {instr:?}");
+        // println!("\t\texecuting: {instr:?}");
 
         self.set(Reg::Zero, 0);
 
@@ -531,12 +575,11 @@ fn se_word(byte: u32) -> i64 {
     ((byte as i64) << 32) >> 32
 }
 
-pub fn run_emulator(prgm: &[u8]) -> Emulator {
+pub fn run_emulator(prgm: &[u8]) {
     let mut emulator = Emulator::default();
     emulator.flash_prgm(prgm, DRAM_OFFSET as u32);
     emulator.set(Reg::Sp, STACK_OFFSET);
-    emulator.run();
-    emulator
+    crate::interface::start(emulator);
 }
 
 pub fn print_emulator(emulator: &Emulator) {
@@ -556,7 +599,7 @@ pub fn print_emulator(emulator: &Emulator) {
     }
 
     println!("\nConsole:\n{}", String::from_utf8_lossy(&emulator.console));
-    // println!("\nexit code: {}", emulator.exit_code);
+    println!("\nexit code: {}", emulator.exit_code);
 }
 
 /// https://github.com/d0iasm/rvemu/blob/main/tests/rv32i.rs

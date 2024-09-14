@@ -1,3 +1,4 @@
+BasedOnStyle: Google
 IndentWidth: 4
 AllowShortFunctionsOnASingleLine: None
 AlwaysBreakAfterReturnType: None
@@ -6,3 +7,4 @@ BreakAfterAttributes: Always
 BinPackArguments: false
 BinPackParameters: false
 MaxEmptyLinesToKeep: 1
+BreakBeforeBraces: Linux

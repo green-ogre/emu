@@ -1,6 +1,6 @@
 use crate::primitives::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Instr {
     Addi(Reg, Reg, Imm),
     Lui(Reg, Imm),

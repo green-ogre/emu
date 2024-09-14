@@ -3,6 +3,7 @@ use std::process::Command;
 mod decoding;
 mod emulator;
 mod instruction_set;
+mod interface;
 mod primitives;
 
 fn main() {
@@ -20,6 +21,7 @@ fn main() {
                     .arg("-nostdlib")
                     .arg("-fno-exceptions")
                     .arg("-fno-rtti")
+                    .arg("-ffreestanding")
                     .arg("-march=rv64g")
                     .arg("-Wall")
                     .arg("-O3")
@@ -56,6 +58,7 @@ fn main() {
     output
         .arg("-nostdlib")
         .arg("-emain")
+        .arg("-ffreestanding")
         .arg("-Wl,-Tmain_linker.ld")
         .arg("-march=rv64g")
         .arg("-o")
@@ -92,15 +95,13 @@ fn main() {
         .output()
         .unwrap();
 
-    let raw = std::fs::read("./emu/build/emu").unwrap();
-    let emulator = emulator::run_emulator(&raw);
-
     println!(
         "\nDisassembly:\n{}\n",
         String::from_utf8_lossy(&objdump_output.stdout)
     );
 
-    emulator::print_emulator(&emulator);
+    let raw = std::fs::read("./emu/build/emu").unwrap();
+    emulator::run_emulator(&raw);
 
     std::fs::remove_dir_all("./emu/build").unwrap();
 }

@@ -57,7 +57,7 @@ impl Reg {
         }
     }
 
-    fn reg_index(&self) -> usize {
+    pub fn reg_index(&self) -> usize {
         match self {
             Reg::Zero => 0,
             Reg::Ra => 1,
