@@ -1,17 +1,29 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define TICK_RATE 30
+// Memory-mapped system tick.
+#define TICK ((volatile uint8_t *)TICK_OFFSET)
+#define TICK_OFFSET 0x1194C
+
 #define DEBUG 1
 #define assert(X) \
     if (!(X)) (*((volatile char *)0x0))
+#define PANIC (*((volatile char *)0x0))
 
 // Memory-mapped screen.
 #define SCREEN ((volatile uint8_t *)SCREEN_OFFSET)
 #define SCREEN_WIDTH 320
 #define SCREEN_HEIGHT 200
+#define SCREEN_BYTES ((SCREEN_WIDTH * SCREEN_HEIGHT) / 8)
 #define SCREEN_OFFSET 0xFA08
+
 #define _RENDER 0x2
 #define RENDER (*((volatile uint8_t *)_RENDER))
+
+// Memory-mapped button.
+#define BUTTON ((volatile uint8_t *)BUTTON_OFFSET)
+#define BUTTON_OFFSET 0x11948
 
 // Allocate memory of size `bytes` from memory-mapped heap.
 void *malloc(int bytes);

@@ -5,6 +5,8 @@
 #include <stdint.h>
 #pragma GCC diagnostic ignored "-Warray-bounds"
 
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 void *memset(void *s, int c, size_t n)
 {
     unsigned char *p = (unsigned char *)s;
@@ -13,6 +15,7 @@ void *memset(void *s, int c, size_t n)
     }
     return s;
 }
+#pragma GCC pop_options
 
 void memcpy(void *dst, const void *src, int bytes)
 {
@@ -85,7 +88,7 @@ static void allocate(Alloc *a, int bytes)
 
     *((Alloc *)(HEAP + new_alloc.offset)) = new_alloc;
 
-#if DEBUG == 1
+#if DEBUG
     memset((void *)((uint8_t *)a + sizeof(Alloc)), 0, a->size - sizeof(Alloc));
 #endif
 
@@ -101,7 +104,7 @@ static void reuse_allocation(Alloc *a, int bytes)
 
     a->is_free = 0;
 
-#if DEBUG == 1
+#if DEBUG
     memset((void *)((uint8_t *)a + sizeof(Alloc)), 0, a->size - sizeof(Alloc));
 #endif
 
@@ -147,7 +150,7 @@ void free(void *block)
            a->offset + HEAP_OFFSET);
     a->is_free = 1;
 
-#if DEBUG == 1
+#if DEBUG
     uint8_t *mem = (uint8_t *)a + sizeof(Alloc);
     for (uint8_t i = 0; i < a->size - sizeof(Alloc); i++) {
         switch (i % 4) {

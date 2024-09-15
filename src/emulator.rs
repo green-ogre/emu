@@ -1,13 +1,17 @@
 use crate::instruction_set::*;
+use crate::io::Button;
 use crate::primitives::*;
 
+pub const NULL: u64 = 0x0;
+pub const EXIT: u64 = 0x1;
+pub const RENDER: u64 = 0x2;
 pub const CONSOLE_OFFSET: u64 = 0x4;
 pub const HEAP_OFFSET: u64 = 0x8;
 pub const SCREEN_OFFSET: u32 = 0xFA08;
 pub const SCREEN_SIZE: usize = 320 * 200;
-pub const NULL: u64 = 0x0;
-pub const EXIT: u64 = 0x1;
-pub const RENDER: u64 = 0x2;
+
+pub const BUTTON_OFFSET: usize = 0x11948;
+pub const TICK_OFFSET: usize = 0x1194C;
 
 pub const DRAM_OFFSET: u64 = 0x40000000;
 pub const STACK_OFFSET: u64 = USER_MEMORY_SIZE as u64;
@@ -44,6 +48,43 @@ impl Default for Emulator {
 }
 
 impl Emulator {
+    pub fn tick(&mut self) {
+        self.memory[TICK_OFFSET] += 1;
+    }
+
+    pub fn press_button(&mut self, button: Button) {
+        let shamt = match button {
+            Button::Zero => 0,
+            Button::One => 1,
+            Button::Two => 2,
+            Button::Three => 3,
+        };
+
+        self.memory[BUTTON_OFFSET] |= 1 << shamt;
+    }
+
+    pub fn release_button(&mut self, button: Button) {
+        let shamt = match button {
+            Button::Zero => 0,
+            Button::One => 1,
+            Button::Two => 2,
+            Button::Three => 3,
+        };
+
+        self.memory[BUTTON_OFFSET] &= !(1 << shamt);
+    }
+
+    pub fn button(&self, button: Button) -> bool {
+        let shamt = match button {
+            Button::Zero => 0,
+            Button::One => 1,
+            Button::Two => 2,
+            Button::Three => 3,
+        };
+
+        ((self.memory[BUTTON_OFFSET] >> shamt) & 1) == 1
+    }
+
     pub fn current_instruction(&self) -> &Instr {
         &self.current_instr
     }
@@ -149,6 +190,8 @@ impl Emulator {
     }
 
     fn step(&mut self, raw_instr: u32) -> bool {
+        // assert_eq!(self.memory[BUTTON_OFFSET as usize], 0);
+
         if self.exiting {
             // println!("exiting: {}", self.exit_code);
             return false;
@@ -156,7 +199,7 @@ impl Emulator {
 
         // println!("fetching instr: {:#x}:{raw_instr:#x}", self.pc);
 
-        let instr = crate::decoding::decode(raw_instr);
+        let instr = crate::decoding::decode(raw_instr, self.pc);
 
         self.current_instr = instr;
 
@@ -281,16 +324,16 @@ impl Emulator {
                 self.set_signed(dst, self.reg_signed(src) | (imm.val_signed() as i64));
             }
             Instr::Andi(dst, src, imm) => {
-                self.set_signed(dst, self.reg_signed(src) & (imm.val_signed() as i64));
+                self.set(dst, self.reg(src) & imm.val());
             }
             Instr::Slli(dst, src, imm) => {
-                self.set_signed(dst, self.reg_signed(src) << (imm.val_signed() & 0b11111));
+                self.set(dst, self.reg(src) << imm.val());
             }
             Instr::Srli(dst, src, imm) => {
-                self.set_signed(dst, self.reg_signed(src) >> (imm.val() & 0b11111));
+                self.set(dst, self.reg(src) >> imm.val());
             }
             Instr::Srai(dst, src, imm) => {
-                self.set_signed(dst, self.reg_signed(src) >> (imm.val_signed() & 0b11111));
+                self.set_signed(dst, self.reg_signed(src) >> imm.val_signed());
             }
             Instr::Add(dst, src1, src2) => {
                 self.set_signed(
@@ -317,13 +360,10 @@ impl Emulator {
                 );
             }
             Instr::Sll(dst, src1, src2) => {
-                self.set(dst, self.reg(src1) << (self.reg(src2) & 0b11111));
+                self.set(dst, self.reg(src1) << self.reg(src2));
             }
             Instr::Sllw(dst, src1, src2) => {
-                self.set_signed(
-                    dst,
-                    (self.reg(src1) << (self.reg(src2) & 0b11111)) as i32 as i64,
-                );
+                self.set(dst, self.reg(src1) << self.reg(src2));
             }
             Instr::Slt(dst, src1, src2) => {
                 self.set(
@@ -359,24 +399,21 @@ impl Emulator {
                 self.set(dst, self.reg(src1) ^ self.reg(src2));
             }
             Instr::Srl(dst, src1, src2) => {
-                self.set(dst, self.reg(src1) >> (self.reg(src2) & 0b11111));
+                self.set(dst, self.reg(src1) >> (self.reg(src2) & 0b111111));
             }
             Instr::Srlw(dst, src1, src2) => {
-                self.set_signed(
-                    dst,
-                    (self.reg(src1) >> (self.reg(src2) & 0b11111)) as i32 as i64,
-                );
+                self.set(dst, self.reg(src1) >> (self.reg(src2) & 0b111111));
             }
             Instr::Sra(dst, src1, src2) => {
                 self.set_signed(
                     dst,
-                    self.reg_signed(src1) >> (self.reg_signed(src2) & 0b11111),
+                    self.reg_signed(src1) >> (self.reg_signed(src2) & 0b111111),
                 );
             }
             Instr::Sraw(dst, src1, src2) => {
                 self.set_signed(
                     dst,
-                    (self.reg_signed(src1) >> (self.reg_signed(src2) & 0b11111)) as i32 as i64,
+                    self.reg_signed(src1) >> (self.reg_signed(src2) & 0b111111),
                 );
             }
             Instr::Or(dst, src1, src2) => {

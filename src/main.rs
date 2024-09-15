@@ -1,11 +1,5 @@
 use std::process::Command;
 
-mod decoding;
-mod emulator;
-mod instruction_set;
-mod interface;
-mod primitives;
-
 fn main() {
     let _ = std::fs::create_dir("./emu/build");
 
@@ -101,7 +95,7 @@ fn main() {
     );
 
     let raw = std::fs::read("./emu/build/emu").unwrap();
-    emulator::run_emulator(&raw);
+    emu::emulator::run_emulator(&raw);
 
     std::fs::remove_dir_all("./emu/build").unwrap();
 }

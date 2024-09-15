@@ -3,6 +3,19 @@ name = "emu"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "emu"
+path = "src/lib.rs"
+
+[[bin]]
+name = "emu"
+path = "src/main.rs"
+
 [dependencies]
 bevy = "0.14.2"
+criterion = "0.5.1"
 iyes_perf_ui = "0.3.0"
+
+[[bench]]
+name = "bench"
+harness = false

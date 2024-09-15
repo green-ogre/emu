@@ -1,6 +1,12 @@
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+
+use crate::emulator;
 use crate::emulator::*;
 use crate::instruction_set::*;
 use crate::primitives::*;
+use bevy::window::PresentMode;
 use bevy::window::WindowResolution;
 use bevy::{
     input::{keyboard::KeyboardInput, ButtonState},
@@ -14,17 +20,21 @@ use iyes_perf_ui::{entries::PerfUiBundle, PerfUiPlugin};
 
 pub fn start(emulator: Emulator) {
     App::default()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Emu".into(),
-                resizable: false,
-                resolution: WindowResolution::new(1920., 1080.),
-                // present_mode: bevy::window::PresentMode::Immediate,
-                ..Default::default()
-            }),
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Emu".into(),
+                        resizable: false,
+                        resolution: WindowResolution::new(1920., 1080.),
+                        present_mode: PresentMode::Immediate,
+                        ..Default::default()
+                    }),
 
-            ..Default::default()
-        }))
+                    ..Default::default()
+                })
+                .set(ImagePlugin::default_nearest()),
+        )
         .add_plugins((
             bevy::diagnostic::EntityCountDiagnosticsPlugin,
             bevy::diagnostic::SystemInformationDiagnosticsPlugin,
@@ -32,8 +42,9 @@ pub fn start(emulator: Emulator) {
             PerfUiPlugin,
         ))
         .insert_resource(Emu(emulator))
+        .insert_resource(Profiler::default())
         .add_systems(Startup, startup)
-        .add_systems(Update, (close_on_escape, step, exit).chain())
+        .add_systems(Update, (close_on_escape, update_buttons, exit).chain())
         .add_systems(
             PostUpdate,
             (
@@ -41,10 +52,17 @@ pub fn start(emulator: Emulator) {
                 display_instructions.run_if(resource_exists::<StepTimer>),
                 display_console,
                 display_screen,
+                display_buttons,
             ),
         )
-        .insert_resource(StepTimer(Timer::from_seconds(0.01, TimerMode::Repeating)))
+        .add_systems(FixedUpdate, (update_tick, step).chain())
+        .insert_resource(Time::<Fixed>::from_seconds(1. / 60.))
+        // .insert_resource(StepTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .run();
+}
+
+fn update_tick(mut emulator: ResMut<Emu>) {
+    emulator.0.tick();
 }
 
 #[derive(Resource)]
@@ -114,6 +132,34 @@ fn startup(
             }
         });
 
+    // Buttons
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::End,
+                position_type: PositionType::Absolute,
+                left: Val::Percent(90.),
+                bottom: Val::Percent(5.),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|parent| {
+            for i in 0..4 {
+                parent.spawn((
+                    TextBundle::from_section(
+                        format!("B{}", i),
+                        TextStyle {
+                            font_size: (window.resolution.physical_height() / 20) as f32,
+                            ..default()
+                        },
+                    ),
+                    Button(crate::io::Button::new(i)),
+                ));
+            }
+        });
+
     // Console
     commands.spawn((
         TextBundle::from_section(
@@ -149,7 +195,7 @@ fn startup(
         Screen(texture.clone()),
         SpriteBundle {
             texture,
-            transform: Transform::from_scale(Vec3::splat(2.)),
+            transform: Transform::from_scale(Vec3::splat(3.)),
             ..Default::default()
         },
     ));
@@ -158,18 +204,44 @@ fn startup(
 #[derive(Resource)]
 struct StepTimer(Timer);
 
+#[derive(Resource)]
+struct Profiler {
+    frame: Duration,
+    bevy: SystemTime,
+}
+
+impl Default for Profiler {
+    fn default() -> Self {
+        Self {
+            frame: Duration::default(),
+            bevy: SystemTime::now(),
+        }
+    }
+}
+
 fn step(
     mut emulator: ResMut<Emu>,
     mut writer: EventWriter<AppExit>,
     mut timer: Option<ResMut<StepTimer>>,
+    // mut prof: ResMut<Profiler>,
+    // mut window: Query<&mut Window>,
     time: Res<Time>,
 ) {
     if let Some(timer) = &mut timer {
         timer.0.tick(time.delta());
+
         if timer.0.just_finished() {
             emulator.0.run_next();
         }
+
+        if emulator.0.finished() {
+            writer.send(AppExit::Success);
+        }
     } else {
+        // let bevy_time = SystemTime::now()
+        //     .duration_since(prof.bevy)
+        //     .unwrap_or_default();
+        // let start = SystemTime::now();
         while !emulator.0.should_render() {
             emulator.0.run_next();
             if emulator.0.finished() {
@@ -177,6 +249,15 @@ fn step(
                 break;
             }
         }
+        // prof.frame = SystemTime::now().duration_since(start).unwrap();
+        // prof.bevy = SystemTime::now();
+        //
+        // let mut window = window.single_mut();
+        // window.title = format!(
+        //     "Emu - {}ms - {}ms",
+        //     prof.frame.as_millis(),
+        //     bevy_time.as_millis()
+        // );
     }
 }
 
@@ -222,6 +303,46 @@ fn display_instructions(
             instr.0 = tmp1;
             tmp1 = tmp2;
             text.sections[0].value = format!("{:?}", instr.0,);
+        }
+    }
+}
+
+#[derive(Component)]
+struct Button(crate::io::Button);
+
+fn update_buttons(mut reader: EventReader<KeyboardInput>, mut emulator: ResMut<Emu>) {
+    for input in reader.read() {
+        match input.state {
+            ButtonState::Pressed => match input.key_code {
+                KeyCode::KeyW => emulator.0.press_button(crate::io::Button::Zero),
+                KeyCode::KeyA => emulator.0.press_button(crate::io::Button::One),
+                KeyCode::KeyS => emulator.0.press_button(crate::io::Button::Two),
+                KeyCode::KeyD => emulator.0.press_button(crate::io::Button::Three),
+                _ => {}
+            },
+            ButtonState::Released => match input.key_code {
+                KeyCode::KeyW => emulator.0.release_button(crate::io::Button::Zero),
+                KeyCode::KeyA => emulator.0.release_button(crate::io::Button::One),
+                KeyCode::KeyS => emulator.0.release_button(crate::io::Button::Two),
+                KeyCode::KeyD => emulator.0.release_button(crate::io::Button::Three),
+                _ => {}
+            },
+        }
+    }
+}
+
+fn display_buttons(
+    mut instrs: Query<(&mut Text, &Button)>,
+    window: Query<&Window>,
+    emulator: Res<Emu>,
+) {
+    let window = window.single();
+
+    for (mut text, button) in instrs.iter_mut() {
+        if emulator.0.button(button.0) {
+            text.sections[0].style.color = Color::xyz(1., 1., 1.);
+        } else {
+            text.sections[0].style.color = Color::xyz(0.2, 0.2, 0.2);
         }
     }
 }

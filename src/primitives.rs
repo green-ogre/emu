@@ -10,9 +10,9 @@ pub enum Reg {
     Sp,
     Gp,
     Tp,
-    T(usize),
-    S(usize),
-    A(usize),
+    T(u8),
+    S(u8),
+    A(u8),
 }
 
 impl Reg {

@@ -1,7 +1,7 @@
 use crate::instruction_set::*;
 use crate::primitives::*;
 
-pub fn decode(raw_instr: u32) -> Instr {
+pub fn decode(raw_instr: u32, pc: u64) -> Instr {
     let opcode = raw_instr & 0b1111111;
     match opcode {
         // R-type
@@ -239,6 +239,6 @@ pub fn decode(raw_instr: u32) -> Instr {
             Instr::Jal(rd, imm)
         }
         0b1110011 => Instr::Ecall,
-        opcode => panic!("invalid opcode: {:#x}", opcode),
+        opcode => panic!("invalid opcode: {:#x}, pc: {:#x}", opcode, pc),
     }
 }
