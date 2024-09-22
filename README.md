@@ -1,4 +1,4 @@
-# Emu: RISC-V Emulataor
+# Emu: RISC-V Emulator
 
 Native RISC-V emulator in Rust.
 
